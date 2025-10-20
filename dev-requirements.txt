@@ -1,0 +1,27 @@
+# === Development & Linting ===
+black>=24.8.0           # automatic code formatting (PEP8 compliant)
+isort>=5.13.2           # import sorting for consistent style
+flake8>=7.1.0           # static code style and error checking
+mypy>=1.11.2            # type checking for function signatures
+
+# === Testing ===
+pytest>=8.3.2           # test framework for unit/integration tests
+pytest-cov>=5.0.0       # coverage reporting
+pytest-mock>=3.14.0     # mocking utilities for PyTest
+
+# === Notebooks & Reports ===
+jupyterlab>=4.2.5       # full-featured notebook IDE
+nbconvert>=7.16.4       # export notebooks to HTML/PDF
+ipykernel>=6.29.5       # kernel for notebook execution
+matplotlib>=3.9.0       # consistent with runtime deps
+
+# === Documentation ===
+sphinx>=7.3.7           # build docs (API reference)
+sphinx-rtd-theme>=2.0.0 # ReadTheDocs-style theme
+myst-parser>=3.0.1      # support Markdown in Sphinx
+pdoc>=14.5.0            # quick auto-doc generator for Python projects
+
+# === Dev Utilities ===
+pre-commit>=3.8.0       # run checks automatically before commits
+rich>=13.7.1            # rich terminal formatting (for logs)
+tqdm>=4.66.5            # progress bars, consistent with main deps
