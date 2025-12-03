@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Optional, Union, Tuple, Dict, List
 
 import cv2
@@ -180,6 +181,31 @@ def _calibrate_pipeline(
 
     For camera sources we request the desired resolution to match runtime.
     """
+    # If configured, try to load a previously saved homography and skip calibration
+    try:
+        use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
+        if use_saved:
+            h_path = getattr(config, "HOMOGRAPHY_PATH", None)
+            if h_path is not None:
+                try:
+                    h_file = Path(h_path)
+                    if h_file.exists():
+                        H = np.load(str(h_file))
+                        if isinstance(H, np.ndarray) and H.shape == (3, 3) and np.isfinite(H).all():
+                            pipeline._H_board = H.astype(np.float32)  # type: ignore[attr-defined]
+                            pipeline._is_calibrated = True  # type: ignore[attr-defined]
+                            _log.info("Loaded saved homography from %s", h_file)
+                            return True
+                        else:
+                            _log.warning("Saved homography at %s is invalid; falling back to calibration.", h_file)
+                    else:
+                        _log.info("Configured to use saved homography, but file not found at %s; calibrating.", h_file)
+                except Exception as exc:  # noqa: BLE001 - log and continue to calibrate
+                    _log.warning("Failed to load saved homography: %s; calibrating instead.", exc)
+    except Exception:
+        # If config attributes are missing or any error occurs, just proceed with calibration
+        pass
+
     temp_cap = cv2.VideoCapture(source)
     if not temp_cap.isOpened():
         _log.error("Could not open source for calibration: %s", source)
@@ -206,6 +232,35 @@ def _calibrate_pipeline(
         _log.error("Calibration failed, aborting")
         return False
     _log.info("Calibration successful")
+
+    # Always save homography after a successful calibration so it can be reused
+    try:
+        h_path = getattr(config, "HOMOGRAPHY_PATH", None)
+        H = getattr(pipeline, "_H_board", None)
+        if h_path is not None and isinstance(H, np.ndarray) and H.shape == (3, 3):
+            h_file = Path(h_path)
+            # Ensure directory exists
+            try:
+                h_file.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            try:
+                np.save(str(h_file), H)
+                # Verify immediately
+                try:
+                    H_chk = np.load(str(h_file))
+                    if isinstance(H_chk, np.ndarray) and H_chk.shape == (3, 3):
+                        _log.info("Saved homography to %s", h_file)
+                    else:
+                        _log.warning("Homography file written at %s but contents invalid (shape=%s)", h_file,
+                                     getattr(H_chk, 'shape', None))
+                except Exception as exc:
+                    _log.warning("Homography save verification failed for %s: %s", h_file, exc)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("Failed to save homography to %s: %s", h_file, exc)
+    except Exception:
+        # Do not fail the run if saving failed
+        pass
     return True
 
 

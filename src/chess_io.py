@@ -25,6 +25,11 @@ def write_moves_txt(moves: List[str], out_path: Optional[Path] = None) -> None:
         return
 
     out_path = Path(out_path) if out_path is not None else config.GAME_MOVES_TXT_PATH
+    # Ensure destination directory exists
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
 
     board = chess.Board()
     game = chess.pgn.Game()
@@ -61,8 +66,10 @@ def write_moves_txt(moves: List[str], out_path: Optional[Path] = None) -> None:
             _log.warning("Could not write moves to %s: %s", out_path, e)
         return
 
-    # Result (if determinable); otherwise use "*"
-    result = board.result(claim_draw=True) if board.is_game_over(claim_draw=True) else "*"
+    # Result policy: only declare a result on checkmate; otherwise use "*"
+    # This intentionally ignores draws (stalemate, repetition, 50-move) and
+    # keeps the PGN result as "*" unless there is a checkmate.
+    result = board.result() if board.is_checkmate() else "*"
     game.headers["Result"] = result
 
     exporter = chess.pgn.StringExporter(headers=True, variations=False, comments=False)

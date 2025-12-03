@@ -21,6 +21,11 @@ _log = get_logger(__name__)
 def _append_move_log(info: MoveInfo) -> None:
     """Append a single move to the CSV-like log file. Errors are non-fatal."""
     try:
+        # Ensure directory exists
+        try:
+            config.MOVES_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
         with open(config.MOVES_LOG_PATH, "a", encoding="utf8") as f:
             f.write(f"{info.move.uci()};{info.san};{info.fen_after}\n")
     except OSError as e:
@@ -118,11 +123,10 @@ class MultiStagePipeline(BaseLivePipeline):
             # Optional file logging (non-fatal on errors)
             _append_move_log(info)
 
-            # If the game ended (checkmate, stalemate, etc.), save and reset
-            if getattr(info, "is_game_over", False):
+            # Reset ONLY on checkmate; ignore draws
+            if getattr(info, "is_checkmate", False):
                 _log.info(
-                    "[MAIN] Game over detected (result: %s). Saving game and resetting to initial position...",
-                    getattr(info, "result", None),
+                    "[MAIN] Checkmate detected. Saving game and resetting to initial position...",
                 )
                 # Save current game moves to PGN/text
                 try:

@@ -2,6 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# Paths
+# Resolve important directories relative to this file (src/) and project root.
+_SRC_DIR: Path = Path(__file__).resolve().parent
+PROJECT_ROOT: Path = _SRC_DIR.parent
+MODELS_DIR: Path = PROJECT_ROOT / "models"
+DATA_DIR: Path = PROJECT_ROOT / "data"
+VIDEOS_DIR: Path = DATA_DIR / "videos"
+CALIBRATION_DIR: Path = _SRC_DIR / "pipeline" / "calibration"
+GAME_MOVES_DIR: Path = _SRC_DIR / "pipeline" / "game_moves"
+
 # Input source
 # Note: The live app now automatically probes the actual source dimensions.
 # FRAME_WIDTH/HEIGHT are only used as a fallback if probing fails.
@@ -30,26 +40,32 @@ BOARD_SQUARES: int = 8
 BOARD_MARGIN_SQUARES: float = 1.7
 
 USE_VIDEO_FILE: bool = False
-VIDEO_PATH: Path = Path("../../../data/videos/test.mp4")
+# Default sample video resolved under project data/videos
+VIDEO_PATH: Path = VIDEOS_DIR / "test.mp4"
 
 # Calibration
 CALIBRATION_MAX_FRAMES: int = 500
 AUTO_MIN_BOARD_AREA_RATIO: float = 0.08
+# Whether to load a previously saved homography instead of calibrating
+USE_SAVED_HOMOGRAPHY: bool = True
+# Where to save/load the homography matrix (NumPy .npy file)
+HOMOGRAPHY_PATH: Path = CALIBRATION_DIR / "homography.npy"
 # Preprocessing size for Stage1 (auto/manual calibration and rectification)
 # The camera can capture at 4 K, but corner detection works more reliably and
 # faster on a moderately sized preprocessed image. The rectifier will use this
 # long-edge size consistently both during calibration and runtime.
-CALIBRATION_TARGET_LONG_EDGE: int = 1280
+CALIBRATION_TARGET_LONG_EDGE: int = BOARD_SIZE_PX
 
 # Parallel detection workers
 DETECTION_WORKERS: int = 1
 
-# Logging
-MOVES_LOG_PATH: Path = Path("pipeline/game_moves/moves.log")
-GAME_MOVES_TXT_PATH: Path = Path("pipeline/game_moves/game_moves.txt")
+# Logging (resolve under src/pipeline/game_moves)
+MOVES_LOG_PATH: Path = GAME_MOVES_DIR / "moves.log"
+GAME_MOVES_TXT_PATH: Path = GAME_MOVES_DIR / "game_moves.txt"
 
 # YOLO based piece detector for stage2
-YOLO_PIECE_WEIGHTS: Path = Path("../../models") / f"yolo11m_best_{BOARD_SIZE_PX}.onnx"
+# Resolve models directory relative to the project root
+YOLO_PIECE_WEIGHTS: Path = MODELS_DIR / f"yolo11m_best_{BOARD_SIZE_PX}.onnx"
 YOLO_PIECE_IMGSZ: int = BOARD_SIZE_PX
 YOLO_PIECE_CONF: float = 0.5
 MIN_IOU: float = 0.15
@@ -57,6 +73,7 @@ MIN_IOU: float = 0.15
 # UI
 DISPLAY_WINDOW_NAME: str = "Board"
 GUI_ENABLED: bool = True
+OPENCV_NUM_THREADS: int = 0  # 0 = OpenCV decides; >0 to force a limit
 
 # Move tracker settings
 MOVE_FILTER_ALPHA: float = 0.3

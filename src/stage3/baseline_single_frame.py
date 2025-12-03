@@ -1,166 +1,112 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-
-import chess
-
-from src.types import PieceDetection, MoveInfo
-
-_PIECE_TYPE_FROM_CHAR: Dict[str, int] = {
-    "p": chess.PAWN,
-    "n": chess.KNIGHT,
-    "b": chess.BISHOP,
-    "r": chess.ROOK,
-    "q": chess.QUEEN,
-    "k": chess.KING,
-}
+from typing import Dict, Optional
 
 
 class SingleFrameBaseline:
     """
-    Baseline recognizer that uses only the current frame.
+    Pure detection-based single-frame baseline (no python-chess).
 
-    Pipeline idea:
-      - you pass a list of PieceDetection objects for each frame
-      - the recognizer compares all legal moves with the detections
-      - the move whose resulting board best matches the detections
-        is returned as MoveInfo
+    It keeps a reference occupancy map of the last committed board state and
+    proposes a move whenever the current occupancy differs exactly on two
+    squares: one source that went from occupied -> empty and one destination
+    that went from empty -> occupied.
 
-    No multi-frame filter, no history other than the current board state.
+    The caller is responsible for debouncing and for calling commit() once a
+    proposed move has been accepted, which updates the reference state.
     """
 
-    def __init__(
+    def __init__(self) -> None:
+        # Reference of the last committed state
+        self._ref_occ: Optional[Dict[str, bool]] = None
+        self._ref_pieces: Optional[Dict[str, Optional[str]]] = None
+
+    def reset(
             self,
-            start_fen: str = chess.STARTING_FEN,
-            max_mismatch_squares: int = 10,
+            initial_occ: Optional[Dict[str, bool]] = None,
+            initial_pieces: Optional[Dict[str, Optional[str]]] = None,
     ) -> None:
-        """
-        start_fen: starting position of the game
-        max_mismatch_squares: maximum allowed mismatching squares between
-                              simulated board and detections
-        """
-        self.board = chess.Board(start_fen)
-        self.max_mismatch_squares = int(max_mismatch_squares)
+        """Reset the internal reference to the provided maps (optional)."""
+        self._ref_occ = dict(initial_occ) if initial_occ is not None else None
+        self._ref_pieces = (
+            dict(initial_pieces) if initial_pieces is not None else None
+        )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def reset(self, fen: str = chess.STARTING_FEN) -> None:
-        """Reset the internal board state."""
-        self.board = chess.Board(fen)
-
-    def update(self, detections: List[PieceDetection]) -> Optional[MoveInfo]:
-        """
-        Update the baseline with a single-frame detection.
-
-        Parameters:
-          detections: list of all square detections for the current frame.
-                      There should be at most one detection per square
-                      (this is enforced here by keeping the max score).
-
-        Returns:
-          MoveInfo if a consistent move was found,
-          otherwise None.
-        """
-        if self.board.is_game_over():
-            return None
-
-        square_to_det = self._merge_detections_per_square(detections)
-        if not square_to_det:
-            # nothing detected; don't attempt to infer a move
-            return None
-
-        best_move: Optional[chess.Move] = None
-        best_cost: float = float("inf")
-
-        board_before = self.board.copy(stack=False)
-
-        for move in board_before.legal_moves:
-            # simulate the position after this move
-            sim_board = board_before.copy(stack=False)
-            sim_board.push(move)
-
-            cost = self._mismatch_cost(sim_board, square_to_det)
-            if cost < best_cost:
-                best_cost = cost
-                best_move = move
-
-        if best_move is None:
-            return None
-
-        if best_cost > self.max_mismatch_squares:
-            # detections do not match any legal move well enough
-            return None
-
-        # apply the best move to the live board
-        self.board.push(best_move)
-        fen_after = self.board.fen()
-        san = board_before.san(best_move)
-
-        return MoveInfo(move=best_move, san=san, fen_after=fen_after)
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _merge_detections_per_square(
-            detections: List[PieceDetection],
-    ) -> Dict[str, PieceDetection]:
-        """
-        Select the detection with the highest confidence per square.
-        """
-        result: Dict[str, PieceDetection] = {}
-        for det in detections:
-            prev = result.get(det.square)
-            if prev is None or det.score > prev.score:
-                result[det.square] = det
-        return result
-
-    def _mismatch_cost(
+    def update_state(
             self,
-            board: chess.Board,
-            square_to_det: Dict[str, PieceDetection],
-    ) -> int:
+            curr_occ: Dict[str, bool],
+            curr_pieces: Optional[Dict[str, Optional[str]]] = None,
+    ) -> Optional[str]:
         """
-        Simple cost function:
-          - +1 if there is a piece on the board but nothing was detected
-          - +1 if something was detected but the board square is empty
-          - +1 if color or piece type does not match
+        Compare current state against the reference and, if it looks like a
+        single move, return the UCI-like string '<from><to>' such as 'e2e4'.
+        Supported patterns:
+          - Exactly one square cleared and one square filled (normal move)
+          - One square cleared and one still-occupied square changed label (capture)
 
-        The lower the cost, the better the simulated position matches
-        the detections.
+        Returns None if the change is ambiguous or noisy.
+
+        This method does NOT update the internal reference. Call commit() after
+        confirming the move externally.
         """
-        cost = 0
+        if not curr_occ:
+            return None
 
-        for square in chess.SQUARES:
-            square_name = chess.square_name(square)
-            piece = board.piece_at(square)
-            det = square_to_det.get(square_name)
+        # Establish reference if missing
+        if self._ref_occ is None:
+            self._ref_occ = dict(curr_occ)
+        if self._ref_pieces is None and curr_pieces is not None:
+            self._ref_pieces = dict(curr_pieces)
 
-            if det is None and piece is None:
-                continue
+        if self._ref_occ is None:
+            return None
 
-            if det is None and piece is not None:
-                cost += 1
-                continue
+        from_sq: Optional[str] = None
+        to_sq: Optional[str] = None
+        label_changes: int = 0
+        label_sq: Optional[str] = None
 
-            if det is not None and piece is None:
-                cost += 1
-                continue
+        # Iterate keys from reference
+        for sq, was_occ in self._ref_occ.items():
+            now_occ = bool(curr_occ.get(sq, False))
 
-            assert det is not None and piece is not None
+            if was_occ and not now_occ:
+                if from_sq is None:
+                    from_sq = sq
+                else:
+                    # multiple sources -> ambiguous
+                    return None
+            elif not was_occ and now_occ:
+                if to_sq is None:
+                    to_sq = sq
+                else:
+                    # multiple destinations -> ambiguous
+                    return None
+            else:
+                # Occupancy unchanged; check label change if we track pieces
+                if was_occ and now_occ and self._ref_pieces is not None and curr_pieces is not None:
+                    prev_lbl = self._ref_pieces.get(sq)
+                    curr_lbl = curr_pieces.get(sq)
+                    if (prev_lbl or "").lower() != (curr_lbl or "").lower():
+                        label_changes += 1
+                        label_sq = sq
 
-            det_color = chess.WHITE if det.color.lower() == "white" else chess.BLACK
-            det_piece_type = _PIECE_TYPE_FROM_CHAR.get(det.piece_type.lower())
+        # Accept simple move
+        if from_sq and to_sq and label_changes == 0:
+            return f"{from_sq}{to_sq}"
 
-            if det_piece_type is None:
-                # unknown type counts as a full mismatch
-                cost += 1
-                continue
+        # Accept capture heuristic: from + one label change
+        if from_sq and not to_sq and label_changes == 1 and label_sq is not None:
+            return f"{from_sq}{label_sq}"
 
-            if piece.color != det_color or piece.piece_type != det_piece_type:
-                cost += 1
+        return None
 
-        return cost
+    def commit(
+            self,
+            new_ref_occ: Dict[str, bool],
+            new_ref_pieces: Optional[Dict[str, Optional[str]]] = None,
+    ) -> None:
+        """Update the reference state after a confirmed move."""
+        self._ref_occ = dict(new_ref_occ)
+        if new_ref_pieces is not None:
+            self._ref_pieces = dict(new_ref_pieces)
