@@ -34,6 +34,8 @@ notebooks/.ipynb_cache/
 # (Large or local-only data that should not be committed)
 data/raw/
 data/processed/
+data/raw_images/
+data/videos/
 data/calibration/
 data/labels/
 data/tmp/
@@ -50,6 +52,15 @@ results/
 *.csv              # generated evaluation logs
 *.json             # generated predictions / eval outputs
 *.yaml             # config exports (keep only your template)
+
+# Project-specific training artifacts
+training_data/
+
+# Live run artifacts (game logs/moves)
+src/pipeline/game_moves/*.log
+src/pipeline/game_moves/*.txt
+pipeline/game_moves/*.log
+pipeline/game_moves/*.txt
 
 # === VIDEO & IMAGE CAPTURE ===
 *.mp4
@@ -92,6 +103,23 @@ desktop.ini
 .ruff_cache/
 .pre-commit-config.yaml.bak
 
+# === ENV / SECRETS ===
+.env
+.env.*
+*.env
+.python-version
+
+# === COVERAGE / REPORTS ===
+coverage.xml
+
 # === GIT-LFS (optional large files placeholder) ===
 # *.pt filter=lfs diff=lfs merge=lfs -text
 # *.mp4 filter=lfs diff=lfs merge=lfs -text
+
+# === GLOBAL OVERRIDE: keep only src/ tracked ===
+# Interpret request: only the src/ directory should be visible to Git by default.
+# Existing tracked files are unaffected by .gitignore rules.
+/*
+!.gitignore
+!/src/
+!/src/**

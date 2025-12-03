@@ -1,177 +1,83 @@
-# ♟️ Automated Chess Move Recognition in Live Video
+Chess Move Recognition (Live)
 
-**Bachelor Thesis — Jannes Wolarz**
-University of Europe for Applied Sciences (UE Innovation Hub, Potsdam)
-Supervisor: Prof. Dr. Rand Kouatly
+This repository provides a live chess move recognition application. It reads frames from a camera or video, rectifies
+the chessboard, detects pieces with a YOLO model, and infers moves either with a temporal tracker (multi-stage) or a
+simple single-frame baseline.
 
----
+Overview
 
-## 🎯 Project Overview
+- BaseLivePipeline (src/pipeline/live_base.py)
+    - Stage 1: Board rectifier (src/stage1/board_rectifier.py)
+    - Stage 2: YOLO piece detector (src/stage2/piece_detection.py)
+    - Manages threads/queues and optional GUI overlay (src/stage2/piece_overlay.py)
+    - Exposes hooks for Stage 3 that derived pipelines implement
+- MultiStagePipeline (src/pipeline/multistage/live_multistage_main.py)
+    - Uses MoveTracker and MoveTrackerWorker for temporal filtering and tracking
+- SingleFramePipeline (src/pipeline/singleframe/live_singleframe_main.py)
+    - Uses SingleFrameBaseline for single-frame move inference
+- Entrypoint (src/pipeline/live_entrypoint.py)
+    - Chooses the pipeline via config.PIPELINE_MODE and starts the live run
 
-This project implements a **camera-based, multi-stage pipeline** to recognize chess moves from real-world video
-recordings.
-It combines **classical computer vision** (OpenCV) with **deep learning** (YOLOv8) and **rule-based inference** to
-detect and validate moves on a standard chessboard without specialized hardware.
+Requirements
 
----
+- Python 3.10+
+- Packages: opencv-python, numpy, ultralytics, python-chess
 
-## 🧠 Research Context
+Quick setup (Windows PowerShell)
 
-While end-to-end networks can classify chess positions, they often fail under real conditions (e.g., perspective,
-lighting, occlusion).
-This system proposes a **modular, interpretable approach**:
+1) Create and activate a virtual env
+    - python -m venv .venv
+    - .\.venv\Scripts\Activate.ps1
+2) Install dependencies
+    - pip install --upgrade pip
+    - pip install opencv-python numpy ultralytics python-chess
 
-1. **Board Rectification** → perspective correction via homography
-2. **Piece Detection** → YOLOv8 model fine-tuned on chess datasets
-3. **Move Inference** → rule-based validation between consecutive frames
+Model weights
 
-The pipeline is evaluated against a **single-frame baseline** to measure improvements in reliability and accuracy.
+- Place your exported YOLO weights (e.g., ONNX) into the models/ folder.
+- Adjust YOLO_PIECE_WEIGHTS in src/config.py if needed.
+- BOARD_SIZE_PX and YOLO_PIECE_IMGSZ should match the model input size.
 
----
+Configuration (src/config.py)
 
-## 📁 Repository Structure
+- Input source: CAMERA_INDEX, USE_VIDEO_FILE, VIDEO_PATH
+- Frame size fallback: FRAME_WIDTH/FRAME_HEIGHT (actual size is probed at runtime)
+- Board geometry: BOARD_SIZE_PX, BOARD_SQUARES, BOARD_MARGIN_SQUARES
+- YOLO detector: YOLO_PIECE_WEIGHTS, YOLO_PIECE_IMGSZ, YOLO_PIECE_CONF, MIN_IOU
+- Pipeline: PIPELINE_MODE = "multistage" or "singleframe"
+- GUI toggle: GUI_ENABLED (True shows OpenCV windows)
+- Logging and queue sizes
 
-```
-chess-move-recognition/
-├─ data/
-│  ├─ raw/              # Original video/images
-│  ├─ calibration/      # Camera intrinsics + homography
-│  ├─ processed/        # Rectified and annotated images
-│  └─ labels/           # Ground-truth JSON / PGN
-├─ models/
-│  └─ yolov8n.pt          # pretrained YOLOv8 model (auto-downloaded if missing)
-├─ results/               # outputs (JSON predictions)
-├─ src/
-│  ├─ calibration/      # Camera calibration + rectification
-│  ├─ detection/        # YOLOv8 piece detection
-│  ├─ inference/        # Rule-based move inference
-│  ├─ baseline/         # Single-frame detection baseline
-│  ├─ utils/            # Visualization, logging, I/O
-│  └─ evaluation/       # Metrics and comparison scripts
-├─ notebooks/           # Jupyter exploration and training logs
-├─ requirements.txt     # Runtime dependencies
-├─ dev-requirements.txt # Developer tools (linting, docs, tests)
-├─ .pre-commit-config.yaml
-├─ .gitignore
-└─ README.md
-```
+Run
+From the project root:
 
----
+- Set PYTHONPATH so that the src package is importable
+    - PowerShell: $env:PYTHONPATH = "."
+- Start the entrypoint
+    - python -m src.pipeline.live_entrypoint
 
-## ⚙️ Installation
+The entrypoint chooses the pipeline based on PIPELINE_MODE and the capture source based on USE_VIDEO_FILE/VIDEO_PATH or
+CAMERA_INDEX. Press ESC to stop.
 
-### 1. Clone and enter the repository
+Choosing the pipeline
 
-```bash
-git clone https://github.com/<yourusername>/chess-move-recognition.git
-cd chess-move-recognition
-```
+- Multi-stage (temporal tracking): set PIPELINE_MODE = "multistage"
+- Single-frame baseline: set PIPELINE_MODE = "singleframe"
 
-### 2. Create and activate a virtual environment
+Outputs
 
-```bash
-python -m venv venv
-venv\Scripts\activate      # Windows
-# or
-source venv/bin/activate   # macOS/Linux
-```
+- Live move logs and game summaries are written to src/pipeline/game_moves/ (paths configurable in src/config.py). These
+  files are ignored by Git by default.
 
-### 3. Install dependencies
+Troubleshooting
 
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install -r dev-requirements.txt  # (optional)
-pre-commit install                   # enable auto-format checks
-```
+- Missing model weights: verify the file exists at YOLO_PIECE_WEIGHTS.
+- No GUI window: set GUI_ENABLED=True and run in a desktop session; in headless mode OpenCV windows are disabled.
+- Wrong camera: set CAMERA_INDEX or enable USE_VIDEO_FILE with VIDEO_PATH.
+- Performance: set DETECTION_WORKERS (>1 spawns multiple YOLO models) and optionally OPENCV_NUM_THREADS if available.
 
----
+License
+Add your license information here.
 
-## 📸 Data Capture & Calibration
-
-### Step 1 — Record calibration images
-
-Capture ≥20 stills of a printed chessboard pattern from multiple angles.
-
-### Step 2 — Run calibration
-
-```bash
-python src/calibration/calibrate_camera.py
-```
-
-This will output:
-
-- `data/calibration/intrinsics.npz` (K, D matrices)
-- Mean reprojection error for quality control
-
-### Step 3 — Record real gameplay
-
-Save videos in `data/raw/`, preferably static camera with good lighting.
-
----
-
-## 🧩 Running the Pipeline
-
-### Run full video inference
-
-```bash
-python src/inference/pipeline.py --video data/raw/game1.mp4
-```
-
-### Evaluate results
-
-```bash
-python src/evaluation/evaluate.py --pred results/game1_pred.json --truth data/labels/game1_truth.json
-```
-
----
-
-## 🧠 Model Training (YOLOv8)
-
-Train or fine-tune your detector:
-
-```bash
-yolo train data=data/chess.yaml model=yolov8n.pt epochs=50 imgsz=640
-```
-
-Pretrained models and datasets (
-e.g., [ChessReD](https://github.com/chessreid/chessred), [Roboflow Universe](https://universe.roboflow.com)) can be
-linked via YAML configs in `data/`.
-
----
-
-## 📊 Evaluation Metrics
-
-- Piece classification accuracy
-- Board cell localization accuracy
-- Move detection precision/recall
-- Frame-to-frame consistency
-
----
-
-## 🧪 Development Tools
-
-| Tool                               | Purpose                               |
-|------------------------------------|---------------------------------------|
-| `black`, `isort`, `flake8`, `mypy` | Code quality & consistency            |
-| `pytest`, `pytest-cov`             | Testing & coverage                    |
-| `jupyterlab`, `nbconvert`          | Experimentation & reporting           |
-| `sphinx`, `pdoc`                   | Documentation generation              |
-| `pre-commit`                       | Automatic style checks before commits |
-
----
-
-## 📜 License
-
-This project is developed for academic purposes as part of the **Bachelor Thesis at UE Innovation Hub (2025)**.
-All rights reserved by the author unless otherwise stated.
-
----
-
-## 📧 Contact
-
-**Jannes Wolarz**
-Email: your.email@ue-germany.de
-GitHub: [github.com/cassyio](https://github.com/cassyio)
-Supervisor: Prof. Dr. Rand Kouatly
-Program: Business Informatics & Data Science (B.Sc.)
+Acknowledgements
+Built with OpenCV, Ultralytics YOLO, and python-chess.
