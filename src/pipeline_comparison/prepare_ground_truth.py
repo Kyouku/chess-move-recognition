@@ -71,7 +71,7 @@ def _draw_overlay(
     lines: List[str] = [
         f"Frame {frame_idx + 1} / {num_frames}  |  Ply {ply_idx + 1} / {total_plies}: {curr_move}",
         "Controls:",
-        "j: next frame    k: previous frame    J: +10    K: -10    L: +300    H: -300",
+        "j: next frame    k: previous frame    J: +10    K: -10    O: +100    I: -100    L: +300    H: -300",
         "m: mark ply at current frame    s: skip ply",
         "u: undo last mark    q or ESC: quit",
         f"Marked plies: {marked_count}",
@@ -199,6 +199,12 @@ def annotate_game(
             frame_idx = min(frame_idx + 10, max(num_frames - 1, 0))
         elif key == ord("K"):  # backward 10
             frame_idx = max(frame_idx - 10, 0)
+
+        # Jump 100 frames
+        elif key == ord("O"):  # forward 100
+            frame_idx = min(frame_idx + 100, max(num_frames - 1, 0))
+        elif key == ord("I"):  # backward 100
+            frame_idx = max(frame_idx - 100, 0)
 
         # Jump 300 frames
         elif key == ord("L"):  # forward 300

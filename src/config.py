@@ -61,7 +61,7 @@ DETECTION_WORKERS: int = 1
 
 # Logging (resolve under src/pipeline/pipeline_comparison)
 MOVES_LOG_PATH: Path = GAME_MOVES_DIR / "moves.log"
-GAME_MOVES_TXT_PATH: Path = GAME_MOVES_DIR / "pipeline_comparison.txt"
+GAME_MOVES_TXT_PATH: Path = GAME_MOVES_DIR / "game_moves.txt"
 
 # YOLO based piece detector for stage2
 # Resolve models directory relative to the project root
