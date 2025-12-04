@@ -75,9 +75,3 @@ Troubleshooting
 - No GUI window: set GUI_ENABLED=True and run in a desktop session; in headless mode OpenCV windows are disabled.
 - Wrong camera: set CAMERA_INDEX or enable USE_VIDEO_FILE with VIDEO_PATH.
 - Performance: set DETECTION_WORKERS (>1 spawns multiple YOLO models) and optionally OPENCV_NUM_THREADS if available.
-
-License
-Add your license information here.
-
-Acknowledgements
-Built with OpenCV, Ultralytics YOLO, and python-chess.

@@ -123,3 +123,5 @@ coverage.xml
 !.gitignore
 !/src/
 !/src/**
+/training_images_generation/
+/model_comparison/

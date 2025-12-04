@@ -10,7 +10,7 @@ MODELS_DIR: Path = PROJECT_ROOT / "models"
 DATA_DIR: Path = PROJECT_ROOT / "data"
 VIDEOS_DIR: Path = DATA_DIR / "videos"
 CALIBRATION_DIR: Path = _SRC_DIR / "pipeline" / "calibration"
-GAME_MOVES_DIR: Path = _SRC_DIR / "pipeline" / "game_moves"
+GAME_MOVES_DIR: Path = _SRC_DIR / "pipeline" / "moves_log"
 
 # Input source
 # Note: The live app now automatically probes the actual source dimensions.
@@ -39,15 +39,15 @@ BOARD_SIZE_PX: int = 640
 BOARD_SQUARES: int = 8
 BOARD_MARGIN_SQUARES: float = 1.7
 
-USE_VIDEO_FILE: bool = False
+USE_VIDEO_FILE: bool = True
 # Default sample video resolved under project data/videos
-VIDEO_PATH: Path = VIDEOS_DIR / "test.mp4"
+VIDEO_PATH: Path = VIDEOS_DIR / "game1.mp4"
 
 # Calibration
 CALIBRATION_MAX_FRAMES: int = 500
 AUTO_MIN_BOARD_AREA_RATIO: float = 0.08
 # Whether to load a previously saved homography instead of calibrating
-USE_SAVED_HOMOGRAPHY: bool = True
+USE_SAVED_HOMOGRAPHY: bool = False
 # Where to save/load the homography matrix (NumPy .npy file)
 HOMOGRAPHY_PATH: Path = CALIBRATION_DIR / "homography.npy"
 # Preprocessing size for Stage1 (auto/manual calibration and rectification)
@@ -59,9 +59,9 @@ CALIBRATION_TARGET_LONG_EDGE: int = BOARD_SIZE_PX
 # Parallel detection workers
 DETECTION_WORKERS: int = 1
 
-# Logging (resolve under src/pipeline/game_moves)
+# Logging (resolve under src/pipeline/pipeline_comparison)
 MOVES_LOG_PATH: Path = GAME_MOVES_DIR / "moves.log"
-GAME_MOVES_TXT_PATH: Path = GAME_MOVES_DIR / "game_moves.txt"
+GAME_MOVES_TXT_PATH: Path = GAME_MOVES_DIR / "pipeline_comparison.txt"
 
 # YOLO based piece detector for stage2
 # Resolve models directory relative to the project root
@@ -91,4 +91,4 @@ MOVE_OUT_QUEUE_SIZE: int = 64
 # Which live pipeline should run?
 # "multistage" -> MoveTracker with temporal filter
 # "singleframe" -> SingleFrameBaseline without history
-PIPELINE_MODE: str = "singleframe"
+PIPELINE_MODE: str = "multistage"
