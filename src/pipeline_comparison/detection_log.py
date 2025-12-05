@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pickle
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import cv2
 
@@ -16,11 +17,18 @@ from src.types import DetectionState
 _log = get_logger(__name__)
 
 
+@dataclass
+class DetectionLog:
+    detections: List[DetectionState]
+    video_fps: Optional[float]
+    detector_fps: Optional[float]
+
+
 def _ensure_parent_dir(path: Path) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        # Best-effort: log and continue; subsequent file I/O may still fail.
+        # Best effort: log and continue; subsequent file I/O may still fail.
         _log.warning("Could not ensure parent dir for %s: %s", path, exc)
 
 
@@ -39,6 +47,8 @@ def record_detections(
       {
         "video_path": str,
         "detections": List[DetectionState],
+        "video_fps": float,
+        "detector_fps": float,
       }
     """
     video_path = Path(video_path)
@@ -55,6 +65,16 @@ def record_detections(
         getattr(config, "FRAME_HEIGHT", 720)
     )
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+
+    # Try to read the nominal video FPS. If missing, fall back to config or 30.
+    raw_fps = cap.get(cv2.CAP_PROP_FPS)
+    if raw_fps and raw_fps > 0:
+        video_fps = float(raw_fps)
+    else:
+        video_fps = float(getattr(config, "VIDEO_FPS", 30.0))
+        _log.warning(
+            "CAP_PROP_FPS not available, falling back to VIDEO_FPS=%.2f", video_fps
+        )
 
     pipeline = LivePipeline(
         frame_width=width,
@@ -146,7 +166,7 @@ def record_detections(
             )
         )
 
-        # Periodic progress report (INFO so it's visible by default)
+        # Periodic progress report (INFO so it is visible by default)
         if frame_idx % max(1, report_interval) == 0:
             now = time.perf_counter()
             elapsed = now - t_start
@@ -182,6 +202,8 @@ def record_detections(
     payload = {
         "video_path": str(video_path),
         "detections": detections,
+        "video_fps": video_fps,
+        "detector_fps": fps_final,
     }
     data = pickle.dumps(payload)
     with out_path.open("wb") as f:
@@ -189,19 +211,50 @@ def record_detections(
     _log.info("Saved detection log to %s", out_path)
 
 
-def load_detections(path: str | Path) -> List[DetectionState]:
+def load_detections(path: str | Path) -> DetectionLog:
     """
     Load a detection log created by record_detections.
+
+    Supports both the new format with metadata and the old
+    format that was just a plain list of DetectionState objects.
     """
     path = Path(path)
     with path.open("rb") as f:
         payload = pickle.load(f)
 
+    # New format: dict with detections + meta
     if isinstance(payload, dict) and "detections" in payload:
-        return payload["detections"]
+        detections = payload["detections"]
+        if not isinstance(detections, list):
+            raise ValueError(
+                f"Unexpected 'detections' entry type in {path}: {type(detections)}"
+            )
 
-    # Backward compatible: plain list
+        video_fps_raw = payload.get("video_fps")
+        det_fps_raw = payload.get("detector_fps")
+
+        try:
+            video_fps = float(video_fps_raw) if video_fps_raw is not None else None
+        except (TypeError, ValueError):
+            video_fps = None
+
+        try:
+            detector_fps = float(det_fps_raw) if det_fps_raw is not None else None
+        except (TypeError, ValueError):
+            detector_fps = None
+
+        return DetectionLog(
+            detections=detections,
+            video_fps=video_fps,
+            detector_fps=detector_fps,
+        )
+
+    # Backward compatible: plain list of DetectionState
     if isinstance(payload, list):
-        return payload
+        return DetectionLog(
+            detections=payload,
+            video_fps=None,
+            detector_fps=None,
+        )
 
     raise ValueError(f"Unexpected content in {path}: {type(payload)}")

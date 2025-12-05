@@ -9,12 +9,12 @@ from src.app_logging import get_logger, set_log_level
 from src.pipeline_comparison.baseline_offline import run_baseline
 from src.pipeline_comparison.common import PipelineResult
 from src.pipeline_comparison.detection_log import (
+    DetectionLog,
     record_detections,
     load_detections,
 )
 from src.pipeline_comparison.metrics import (
     GroundTruth,
-    fen_frame_accuracy,
     load_ground_truth,
     move_detection_delays,
     move_reconstruction_rate,
@@ -24,7 +24,10 @@ from src.pipeline_comparison.multistage_offline import run_multistage
 _log = get_logger(__name__)
 
 """
-python -m src.pipeline_comparison.compare_pipelines --video data/videos/game1.mp4 --detections data/logs/game1_detections.pkl --gt data/gt/game1.json
+python -m src.pipeline_comparison.compare_pipelines \
+  --video data/videos/game1.mp4 \
+  --detections data/logs/testgame.pkl \
+  --gt data/gt/testgame.json
 """
 
 
@@ -37,9 +40,6 @@ def _report_for_pipeline(name: str, result: PipelineResult, gt: GroundTruth) -> 
     _log.info("[%s] Move Reconstruction Rate (MRR) = %.3f", name, mrr)
 
     if gt.frame_for_ply:
-        fen_acc = fen_frame_accuracy(result.frame_fens, gt)
-        _log.info("[%s] FEN accuracy at annotated frames = %.3f", name, fen_acc)
-
         delays = move_detection_delays(result.moves_uci, result.move_frames, gt)
         if delays:
             _log.info(
@@ -56,20 +56,49 @@ def run_comparison(
 ) -> None:
     """
     Orchestrate offline comparison between the single-frame baseline and the
-    multistage tracker using a pre-recorded detection log. Produces logs only.
+    multistage tracker using a pre recorded detection log. Produces logs only.
+
+    If the detection log contains FPS metadata, a live style sampling is
+    simulated where only frames that the detector could realistically process
+    are fed into the pipelines, similar to the behavior of the threaded
+    live app with a small queue.
     """
-    states = load_detections(detections_path)
+    det_log: DetectionLog = load_detections(detections_path)
+    states = det_log.detections
+    video_fps = det_log.video_fps
+    detector_fps = det_log.detector_fps
+
     _log.info("Loaded detection log: %s", detections_path)
     _log.debug("Detection states loaded: %d", len(states))
 
+    if video_fps is not None and detector_fps is not None:
+        _log.info(
+            "Detection log metadata: video_fps=%.2f, detector_fps=%.2f",
+            video_fps,
+            detector_fps,
+        )
+    else:
+        _log.info(
+            "Detection log has no FPS metadata. Comparison will use all frames "
+            "without live style sampling."
+        )
+
     _log.info("Running single frame baseline on %d frames", len(states))
     _log.debug("Starting baseline pass")
-    baseline = run_baseline(states)
+    baseline = run_baseline(
+        states,
+        video_fps=video_fps,
+        detector_fps=detector_fps,
+    )
     _log.debug("Finished baseline pass")
 
     _log.info("Running multistage tracker on %d frames", len(states))
     _log.debug("Starting multistage pass")
-    multistage = run_multistage(states)
+    multistage = run_multistage(
+        states,
+        video_fps=video_fps,
+        detector_fps=detector_fps,
+    )
     _log.debug("Finished multistage pass")
 
     _log.info("Baseline detected %d moves", len(baseline.moves_uci))
@@ -128,19 +157,24 @@ def _parse_args(argv: List[str] | None = None) -> argparse.Namespace:
         default="INFO",
         help="Logging level (e.g. DEBUG, INFO, WARNING)",
     )
+    p.add_argument(
+        "--force-record",
+        action="store_true",
+        help="Recompute detection log even if it already exists",
+    )
     return p.parse_args(argv)
 
 
 def main(argv: List[str] | None = None) -> None:
     args = _parse_args(argv)
-    # Allow enabling DEBUG output to see per-frame progress
+    # Allow enabling DEBUG output to see per frame progress
     try:
         set_log_level(args.log_level)
     except Exception:
         # Fall back silently if invalid value
         pass
 
-    if not args.detections.exists():
+    if args.force_record or not args.detections.exists():
         if args.video is None:
             raise SystemExit(
                 "Detection log does not exist and no video was provided."

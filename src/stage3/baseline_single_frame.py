@@ -91,8 +91,13 @@ class SingleFrameBaseline:
                         label_changes += 1
                         label_sq = sq
 
-        # Accept simple move
-        if from_sq and to_sq and label_changes == 0:
+        # Accept simple move (ignore label noise on other squares)
+        # Earlier we required label_changes == 0 which proved too strict in
+        # practice due to occasional reclassification noise while occupancy
+        # remains the same on unrelated squares. We only need occupancy diffs
+        # to identify a quiet move reliably, so accept from+to regardless of
+        # label_changes.
+        if from_sq and to_sq:
             return f"{from_sq}{to_sq}"
 
         # Accept capture heuristic: from + one label change

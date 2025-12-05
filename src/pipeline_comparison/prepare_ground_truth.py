@@ -15,7 +15,7 @@ from src.app_logging import get_logger
 _log = get_logger(__name__)
 
 """
-python -m src.pipeline_comparison.prepare_ground_truth --video data/videos/game1.mp4 --pgn data/gt/game1.pgn --out data/gt/game1.json
+python -m src.pipeline_comparison.prepare_ground_truth --video data/videos/game1.mp4 --pgn data/gt/testgame.pgn --out data/gt/testgame.json
 """
 
 

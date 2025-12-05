@@ -6,7 +6,6 @@ import chess
 
 from src import config
 from src.app_logging import get_logger
-from src.chess_io import write_moves_txt
 from src.pipeline.live_base import (
     BaseLivePipeline,
     get_capture_source,
@@ -16,6 +15,50 @@ from src.stage3.baseline_single_frame import SingleFrameBaseline
 from src.types import PieceDetection, DetectionState
 
 _log = get_logger(__name__)
+
+
+def _state_to_fen(state: DetectionState) -> str:
+    """
+    Build a FEN string directly from detections (occupancy + labels),
+    without any legality checks. Unknown or missing labels are treated
+    as empty squares. Non-position fields are filled with placeholders.
+    """
+    files = ["a", "b", "c", "d", "e", "f", "g", "h"]
+
+    def code_to_fen_char(code: Optional[str]) -> Optional[str]:
+        if not code or len(code) < 2:
+            return None
+        c0 = code[0].lower()
+        c1 = code[1].lower()
+        if c0 not in ("w", "b"):
+            return None
+        if c1 not in ("p", "n", "b", "r", "q", "k"):
+            return None
+        return c1.upper() if c0 == "w" else c1
+
+    rows: List[str] = []
+    for rank_idx in range(7, -1, -1):
+        run = 0
+        row_chars: List[str] = []
+        for file_idx in range(8):
+            sq = f"{files[file_idx]}{rank_idx + 1}"
+            occ = bool(state.occupancy.get(sq, False))
+            letter: Optional[str] = None
+            if occ:
+                letter = code_to_fen_char(state.pieces.get(sq))
+            if letter is None:
+                run += 1
+            else:
+                if run > 0:
+                    row_chars.append(str(run))
+                    run = 0
+                row_chars.append(letter)
+        if run > 0:
+            row_chars.append(str(run))
+        rows.append("".join(row_chars))
+
+    placement = "/".join(rows)
+    return f"{placement} w - - 0 1"
 
 
 def _append_move_log(uci: str, san: Optional[str], fen_after: Optional[str]) -> None:
@@ -126,10 +169,8 @@ class SingleFramePipeline(BaseLivePipeline):
 
         self.baseline = SingleFrameBaseline()
 
-        # Maintain a python-chess board solely for SAN/FEN/PGN output (not for detection)
-        self.board = chess.Board()
-        # Collected SAN moves for summary / PGN export
-        self.moves: List[str] = []
+        # Note: python-chess is only used for deriving the start position occupancy.
+        # No legality checks, SAN/FEN generation or game state tracking during runtime.
 
         # Auto initialization: wait until the start position is stably detected
         self._start_occ: Dict[str, bool] = self._board_to_occupancy(chess.Board())
@@ -171,9 +212,6 @@ class SingleFramePipeline(BaseLivePipeline):
                     # Initialize baseline reference at start position, including labels
                     # so that a capture as the very first move can be detected.
                     self.baseline.reset(initial_occ=self._start_occ, initial_pieces=state.pieces)
-                    # Also reset python-chess board and collected moves for output
-                    self.board = chess.Board()
-                    self.moves.clear()
                     _log.info("[BASELINE] Initial position locked. Move detection enabled.")
                     # Skip inference this frame (consistent with multistage behavior)
                     return
@@ -198,19 +236,9 @@ class SingleFramePipeline(BaseLivePipeline):
         # Commit baseline state to the current occupancy/labels
         self.baseline.commit(curr_occ, curr_pieces)
 
-        # Try to convert to SAN using the local python-chess board
+        # No legality checks or SAN here. Derive FEN from detections directly.
         san: Optional[str] = None
-        fen_after: Optional[str] = None
-        try:
-            move_obj = chess.Move.from_uci(uci)
-            if move_obj in self.board.legal_moves:
-                san = self.board.san(move_obj)
-                self.board.push(move_obj)
-                fen_after = self.board.fen()
-                self.moves.append(san)
-        except Exception:
-            # Ignore SAN errors; we still log UCI
-            san = san  # keep None
+        fen_after: Optional[str] = _state_to_fen(state)
 
         # Log to console
         if san is not None:
@@ -224,6 +252,7 @@ class SingleFramePipeline(BaseLivePipeline):
             msg_lines = [
                 "==================================================",
                 f"[BASELINE] Move detected (UCI): {uci}",
+                f"[BASELINE] FEN after: {fen_after}",
                 "==================================================",
             ]
         _log.info("\n".join(msg_lines))
@@ -231,29 +260,10 @@ class SingleFramePipeline(BaseLivePipeline):
         # Append to log file (uci;san;fen)
         _append_move_log(uci, san, fen_after)
 
-        # If checkmate detected via python-chess board, persist and reset
-        if san is not None and self.board.is_checkmate():
-            _log.info("[BASELINE] Checkmate detected. Saving game and resetting...")
-            try:
-                write_moves_txt(self.moves)
-            except (OSError, ValueError) as e:
-                _log.warning("Failed to write game moves on game over: %s", e)
-            # Clear move list and reset python-chess board
-            self.moves.clear()
-            self.board = chess.Board()
-            # Reset startup gating to wait for initial position again
-            self._initialized = False
-            self._start_seen_frames = 0
-            # Re-seed baseline on next lock
-            self.baseline.reset()
+        # No game-over handling via python-chess in single-frame baseline mode.
 
     def on_stop(self) -> None:
-        # Write remaining moves as PGN/text on shutdown
-        if self.moves:
-            try:
-                write_moves_txt(self.moves)
-            except (OSError, ValueError) as e:
-                _log.warning("Failed to write game moves on shutdown: %s", e)
+        # Nothing to persist here in single-frame baseline mode
         return None
 
 

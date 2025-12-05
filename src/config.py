@@ -65,9 +65,9 @@ GAME_MOVES_TXT_PATH: Path = GAME_MOVES_DIR / "game_moves.txt"
 
 # YOLO based piece detector for stage2
 # Resolve models directory relative to the project root
-YOLO_PIECE_WEIGHTS: Path = MODELS_DIR / f"yolo11m_best_{BOARD_SIZE_PX}.onnx"
+YOLO_PIECE_WEIGHTS: Path = MODELS_DIR / f"yolo11s_best_{BOARD_SIZE_PX}.onnx"
 YOLO_PIECE_IMGSZ: int = BOARD_SIZE_PX
-YOLO_PIECE_CONF: float = 0.5
+YOLO_PIECE_CONF: float = 0.15
 MIN_IOU: float = 0.15
 
 # UI
@@ -78,11 +78,11 @@ OPENCV_NUM_THREADS: int = 0  # 0 = OpenCV decides; >0 to force a limit
 # Move tracker settings
 MOVE_FILTER_ALPHA: float = 0.3
 MOVE_FILTER_THRESHOLD: float = 0.65
-MOVE_MIN_CONFIRM_FRAMES: int = 2
+MOVE_MIN_CONFIRM_FRAMES: int = 5
 MOVE_DEBUG: bool = True
 
 # Queue sizes
-FRAME_QUEUE_SIZE: int = 3
+FRAME_QUEUE_SIZE: int = 2
 DETECTION_INPUT_QUEUE_SIZE: int = 1
 DETECTION_OUTPUT_QUEUE_SIZE: int = 3
 MOVE_IN_QUEUE_SIZE: int = 8
@@ -91,4 +91,4 @@ MOVE_OUT_QUEUE_SIZE: int = 64
 # Which live pipeline should run?
 # "multistage" -> MoveTracker with temporal filter
 # "singleframe" -> SingleFrameBaseline without history
-PIPELINE_MODE: str = "multistage"
+PIPELINE_MODE: str = "singleframe"

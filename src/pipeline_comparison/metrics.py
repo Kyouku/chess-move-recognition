@@ -108,37 +108,6 @@ def move_reconstruction_rate(
     return move_accuracy(pred_moves, gt_moves)
 
 
-def fen_frame_accuracy(
-        pred_frame_fens: List[str],
-        gt: GroundTruth,
-) -> float:
-    """
-    Compare predicted model FEN per frame against ground truth FEN for
-    frames that are annotated in gt.frame_for_ply.
-    """
-    if not gt.frame_for_ply:
-        return 0.0
-
-    total = 0
-    correct = 0
-
-    for ply_idx, frame_idx in gt.frame_for_ply.items():
-        if frame_idx < 0 or frame_idx >= len(pred_frame_fens):
-            continue
-        if ply_idx <= 0 or ply_idx > len(gt.fens_after_ply):
-            continue
-
-        total += 1
-        gt_fen = gt.fens_after_ply[ply_idx - 1]
-        pred_fen = pred_frame_fens[frame_idx]
-        if pred_fen == gt_fen:
-            correct += 1
-
-    if total == 0:
-        return 0.0
-    return correct / float(total)
-
-
 def move_detection_delays(
         pred_moves: List[str],
         pred_move_frames: List[int],
