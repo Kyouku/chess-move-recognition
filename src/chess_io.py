@@ -9,6 +9,8 @@ import chess.pgn
 
 from . import config
 from .app_logging import get_logger
+from .io_utils import ensure_parent_dir
+from .types import MoveInfo
 
 _log = get_logger(__name__)
 
@@ -25,11 +27,8 @@ def write_moves_txt(moves: List[str], out_path: Optional[Path] = None) -> None:
         return
 
     out_path = Path(out_path) if out_path is not None else config.GAME_MOVES_TXT_PATH
-    # Ensure destination directory exists
-    try:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
+    # Ensure destination directory exists (non-fatal)
+    ensure_parent_dir(out_path)
 
     board = chess.Board()
     game = chess.pgn.Game()
@@ -86,3 +85,47 @@ def write_moves_txt(moves: List[str], out_path: Optional[Path] = None) -> None:
         _log.info("PGN written to %s", out_path)
     except OSError as e:
         _log.warning("Could not write PGN to %s: %s", out_path, e)
+
+
+def append_move_log(info: MoveInfo, out_path: Optional[Path] = None) -> None:
+    """
+    Append a single move to a CSV-like log file as "uci;san;fen".
+
+    - out_path: optional override for destination file; defaults to
+      config.MOVES_LOG_PATH.
+    - Errors are non-fatal and will only be logged as warnings.
+    """
+    path = Path(out_path) if out_path is not None else config.MOVES_LOG_PATH
+    try:
+        ensure_parent_dir(path)
+        uci = getattr(info.move, "uci", lambda: "")()
+        san = getattr(info, "san", None) or ""
+        fen_after = getattr(info, "fen_after", None) or ""
+        with open(path, "a", encoding="utf8") as f:
+            f.write(f"{uci};{san};{fen_after}\n")
+    except OSError as e:
+        _log.warning("Could not append move to log file %s: %s", path, e)
+
+
+def append_fen_log(fen: str, out_path: Optional[Path] = None) -> None:
+    """
+    Append a FEN snapshot to a text log (one FEN per line).
+
+    - If out_path is None, uses config.FEN_LOG_PATH. If that is None, this is a no-op.
+    - Ensures parent directory exists. Errors are logged as warnings and are non-fatal.
+    """
+    # Resolve destination path
+    if out_path is not None:
+        path: Optional[Path] = Path(out_path)
+    else:
+        path = getattr(config, "FEN_LOG_PATH", None)
+
+    if path is None:
+        return
+
+    try:
+        ensure_parent_dir(path)
+        with open(path, "a", encoding="utf8") as f:
+            f.write(f"{fen}\n")
+    except OSError as e:
+        _log.warning("Could not append FEN to log file %s: %s", path, e)

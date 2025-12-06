@@ -9,6 +9,8 @@ from typing import Dict, List, Tuple
 import chess
 import chess.pgn
 
+from src.pipeline.fen_utils import placement_from_fen
+
 
 @dataclass
 class GroundTruth:
@@ -76,6 +78,165 @@ def load_ground_truth(path: str | Path) -> GroundTruth:
     )
 
 
+# -------------------------------------------------------------
+# FEN metrics
+# -------------------------------------------------------------
+
+
+def fen_frame_counts(
+        frame_fens: List[str],
+        gt: GroundTruth,
+) -> Tuple[int, int]:
+    """
+    Count how many annotated frames have a correct FEN placement at the
+    exact ground truth annotation frame.
+
+    Returns (correct, total).
+    """
+    if not gt.frame_for_ply:
+        return 0, 0
+
+    correct = 0
+    total = 0
+
+    for ply_idx, frame_idx in sorted(gt.frame_for_ply.items()):
+        if ply_idx <= 0 or ply_idx > len(gt.fens_after_ply):
+            continue
+        if frame_idx < 0 or frame_idx >= len(frame_fens):
+            continue
+
+        pred_fen = frame_fens[frame_idx]
+        gt_fen = gt.fens_after_ply[ply_idx - 1]
+
+        pred_placement = placement_from_fen(pred_fen)
+        gt_placement = placement_from_fen(gt_fen)
+
+        total += 1
+        if pred_placement == gt_placement:
+            correct += 1
+
+    return correct, total
+
+
+def fen_frame_accuracy(
+        frame_fens: List[str],
+        gt: GroundTruth,
+) -> float:
+    """
+    Strict FEN based accuracy at annotated frames.
+
+    For each ground truth ply that has a frame annotation, compare the
+    placement portion of
+
+      - the predicted FEN at that frame index, and
+      - the ground truth FEN after that ply.
+
+    The result is the fraction of annotated plies where the placement strings
+    are identical.
+    """
+    correct, total = fen_frame_counts(frame_fens, gt)
+    if total == 0:
+        return 0.0
+    return correct / float(total)
+
+
+def fen_interval_counts(
+        frame_fens: List[str],
+        gt: GroundTruth,
+) -> Tuple[int, int]:
+    """
+    Interval based FEN accuracy.
+
+    For each ground truth ply k that has a frame annotation, consider the
+    interval
+
+      [frame_for_ply[k], frame_for_ply[k_next] - 1]
+
+    where k_next is the next ply with an annotation. For the last annotated
+    ply, the interval extends to the end of the video.
+
+    Count a ply as correct if the target placement (ground truth FEN after
+    that ply) appears at least once in this interval in the predicted FEN
+    sequence.
+
+    Returns (correct, total).
+    """
+    if not gt.frame_for_ply:
+        return 0, 0
+
+    if not frame_fens:
+        return 0, 0
+
+    last_frame_idx = len(frame_fens) - 1
+    items = sorted(gt.frame_for_ply.items())  # list of (ply_idx, start_frame)
+
+    correct = 0
+    total = 0
+
+    for i, (ply_idx, start_frame) in enumerate(items):
+        if ply_idx <= 0 or ply_idx > len(gt.fens_after_ply):
+            continue
+        if start_frame < 0 or start_frame > last_frame_idx:
+            continue
+
+        if i + 1 < len(items):
+            _, next_start = items[i + 1]
+            end_frame = min(next_start - 1, last_frame_idx)
+        else:
+            end_frame = last_frame_idx
+
+        if end_frame < start_frame:
+            continue
+
+        target_placement = placement_from_fen(gt.fens_after_ply[ply_idx - 1])
+        total += 1
+
+        for f_idx in range(start_frame, end_frame + 1):
+            pred_placement = placement_from_fen(frame_fens[f_idx])
+            if pred_placement == target_placement:
+                correct += 1
+                break
+
+    return correct, total
+
+
+def fen_interval_accuracy(
+        frame_fens: List[str],
+        gt: GroundTruth,
+) -> float:
+    """
+    Fraction of plies where the correct FEN placement is seen at least once
+    in the ground truth interval for that ply.
+
+    This metric is robust to delayed confirmations in multistage pipelines.
+    """
+    correct, total = fen_interval_counts(frame_fens, gt)
+    if total == 0:
+        return 0.0
+    return correct / float(total)
+
+
+# -------------------------------------------------------------
+# Move based metrics
+# -------------------------------------------------------------
+
+
+def move_accuracy_counts(pred_moves: List[str], gt_moves: List[str]) -> Tuple[int, int]:
+    """
+    Exact move accuracy at the sequence level.
+
+    Returns (correct, total) where total is the number of ground truth plies.
+    """
+    if not gt_moves:
+        return 0, 0
+
+    correct = 0
+    for i, gt_move in enumerate(gt_moves):
+        if i < len(pred_moves) and pred_moves[i] == gt_move:
+            correct += 1
+    return correct, len(gt_moves)
+
+
 def move_accuracy(pred_moves: List[str], gt_moves: List[str]) -> float:
     """
     Exact move accuracy at the sequence level.
@@ -83,14 +244,10 @@ def move_accuracy(pred_moves: List[str], gt_moves: List[str]) -> float:
     Counts how many ground truth plies are predicted correctly at the
     correct position.
     """
-    if not gt_moves:
+    correct, total = move_accuracy_counts(pred_moves, gt_moves)
+    if total == 0:
         return 0.0
-
-    correct = 0
-    for i, gt in enumerate(gt_moves):
-        if i < len(pred_moves) and pred_moves[i] == gt:
-            correct += 1
-    return correct / float(len(gt_moves))
+    return correct / float(total)
 
 
 def move_reconstruction_rate(
@@ -98,7 +255,7 @@ def move_reconstruction_rate(
         gt_moves: List[str],
 ) -> float:
     """
-    Move Reconstruction Rate (MRR) as defined in the thesis:
+    Move Reconstruction Rate (MRR) as used in the thesis:
 
       fraction of moves in a game that are reconstructed correctly,
       counted over the entire sequence.
@@ -124,11 +281,6 @@ def move_detection_delays(
     if not gt.frame_for_ply:
         return []
 
-    # Important: iterate GT plies in chronological order and align to the
-    # next matching predicted move, not the first occurrence overall. Using
-    # list.index without a start offset can match an early false-positive
-    # prediction and produce large negative delays. We keep a moving cursor
-    # into pred_moves to ensure monotonic alignment.
     delays: List[int] = []
     pred_cursor = -1
 
@@ -138,11 +290,10 @@ def move_detection_delays(
             continue
         gt_move = gt.moves_uci[ply_idx - 1]
 
-        # Find next occurrence of this move at or after pred_cursor + 1
+        # Find the next occurrence of this move at or after pred_cursor + 1
         try:
             pos = pred_moves.index(gt_move, pred_cursor + 1)
         except ValueError:
-            # No further occurrence of this GT move in predictions
             continue
 
         if pos < 0 or pos >= len(pred_move_frames):

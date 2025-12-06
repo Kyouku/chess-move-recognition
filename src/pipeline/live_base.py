@@ -24,8 +24,10 @@ CaptureSource = Union[int, str]
 
 class FrameReader(threading.Thread):
     """
-    Read frames from camera or video file on a background thread.
-    Keeps only the most recent frame to avoid backlog.
+    Read frames from camera or video file in a background thread.
+
+    The queue only keeps the most recent frame so that slow downstream
+    processing does not create a large backlog.
     """
 
     def __init__(
@@ -57,10 +59,9 @@ class FrameReader(threading.Thread):
                 self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, float(self.width))
             if self.height > 0:
                 self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, float(self.height))
-            # Reduce internal buffering if backend supports it (lower latency)
+            # Reduce internal buffering if backend supports it
             self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except cv2.error:
-            # Some backends may not support these properties
             pass
 
         # Log both the requested and the actual negotiated capture size
@@ -83,7 +84,6 @@ class FrameReader(threading.Thread):
             if not ret:
                 break
 
-            # Resize to the expected geometry so downstream sees consistent size
             h, w = frame.shape[:2]
             if w != self.width or h != self.height:
                 frame = cv2.resize(
@@ -92,7 +92,6 @@ class FrameReader(threading.Thread):
                     interpolation=cv2.INTER_AREA,
                 )
 
-            # Keep only the latest frame in the queue
             try:
                 self.frame_queue.put_nowait(frame)
             except queue.Full:
@@ -147,7 +146,6 @@ class DetectionWorker(threading.Thread):
                         confidences=confs,
                     )
 
-                    # Keep only the newest result in the output
                     try:
                         self.output_queue.put_nowait(state)
                     except queue.Full:
@@ -177,11 +175,12 @@ def _calibrate_pipeline(
         desired_width: Optional[int] = None,
         desired_height: Optional[int] = None,
 ) -> bool:
-    """Calibrate stage 1 once before starting the live threads.
-
-    For camera sources we request the desired resolution to match runtime.
     """
-    # If configured, try to load a previously saved homography and skip calibration
+    Calibrate stage 1 once before starting the live threads.
+
+    For camera sources this requests the same resolution as used at runtime.
+    """
+    # First try to load a previously saved homography and skip calibration
     try:
         use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
         if use_saved:
@@ -196,14 +195,21 @@ def _calibrate_pipeline(
                             pipeline._is_calibrated = True  # type: ignore[attr-defined]
                             _log.info("Loaded saved homography from %s", h_file)
                             return True
-                        else:
-                            _log.warning("Saved homography at %s is invalid; falling back to calibration.", h_file)
+                        _log.warning(
+                            "Saved homography at %s is invalid; falling back to calibration.",
+                            h_file,
+                        )
                     else:
-                        _log.info("Configured to use saved homography, but file not found at %s; calibrating.", h_file)
-                except Exception as exc:  # noqa: BLE001 - log and continue to calibrate
-                    _log.warning("Failed to load saved homography: %s; calibrating instead.", exc)
+                        _log.info(
+                            "Configured to use saved homography, but file not found at %s; calibrating.",
+                            h_file,
+                        )
+                except Exception as exc:
+                    _log.warning(
+                        "Failed to load saved homography: %s; calibrating instead.",
+                        exc,
+                    )
     except Exception:
-        # If config attributes are missing or any error occurs, just proceed with calibration
         pass
 
     temp_cap = cv2.VideoCapture(source)
@@ -211,7 +217,6 @@ def _calibrate_pipeline(
         _log.error("Could not open source for calibration: %s", source)
         return False
 
-    # Try to request the same size as we will use at runtime (camera only)
     try:
         if isinstance(source, int):
             if desired_width and desired_width > 0:
@@ -233,41 +238,48 @@ def _calibrate_pipeline(
         return False
     _log.info("Calibration successful")
 
-    # Always save homography after a successful calibration so it can be reused
+    # Save homography after a successful calibration so it can be reused
     try:
         h_path = getattr(config, "HOMOGRAPHY_PATH", None)
         H = getattr(pipeline, "_H_board", None)
         if h_path is not None and isinstance(H, np.ndarray) and H.shape == (3, 3):
             h_file = Path(h_path)
-            # Ensure directory exists
             try:
                 h_file.parent.mkdir(parents=True, exist_ok=True)
             except Exception:
                 pass
             try:
                 np.save(str(h_file), H)
-                # Verify immediately
                 try:
                     H_chk = np.load(str(h_file))
                     if isinstance(H_chk, np.ndarray) and H_chk.shape == (3, 3):
                         _log.info("Saved homography to %s", h_file)
                     else:
-                        _log.warning("Homography file written at %s but contents invalid (shape=%s)", h_file,
-                                     getattr(H_chk, 'shape', None))
+                        _log.warning(
+                            "Homography file written at %s but contents invalid (shape=%s)",
+                            h_file,
+                            getattr(H_chk, "shape", None),
+                        )
                 except Exception as exc:
-                    _log.warning("Homography save verification failed for %s: %s", h_file, exc)
-            except Exception as exc:  # noqa: BLE001
+                    _log.warning(
+                        "Homography save verification failed for %s: %s",
+                        h_file,
+                        exc,
+                    )
+            except Exception as exc:
                 _log.warning("Failed to save homography to %s: %s", h_file, exc)
     except Exception:
-        # Do not fail the run if saving failed
         pass
     return True
 
 
 def _probe_source_size(
-        source: CaptureSource, fallback_w: int, fallback_h: int
+        source: CaptureSource,
+        fallback_w: int,
+        fallback_h: int,
 ) -> Tuple[int, int]:
-    """Open the source once and return the actual frame size reported by OpenCV.
+    """
+    Open the source once and return the actual frame size reported by OpenCV.
 
     If probing fails, return the provided fallback size.
     """
@@ -281,11 +293,9 @@ def _probe_source_size(
         )
         return int(fallback_w), int(fallback_h)
 
-    # Read the reported size from the capture
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    # Some backends report 0 until a frame is read; try to grab one frame
     if w <= 0 or h <= 0:
         ret, frame = cap.read()
         if ret and frame is not None and frame.size > 0:
@@ -307,18 +317,14 @@ def _probe_source_size(
 
 class BaseLivePipeline(ABC):
     """
-    Base class orchestrating the live chess pipeline.
+    Base class that orchestrates the live chess pipeline.
 
     Separation of concerns:
-    - Frame acquisition (FrameReader) — decoupled in its own thread/class
-    - Rectification (Stage 1) — handled by LivePipeline
-    - Piece detection (Stage 2) — handled by DetectionWorker thread(s)
-    - Presentation and Stage 3 logic — handled via overridable hooks
 
-    Subclasses only need to implement Stage 3 by overriding
-    handle_detection_state() and optionally the lifecycle hooks.
-    The core orchestration loop is intentionally small and delegates
-    to private helper methods for clarity and testability.
+      - Frame acquisition (FrameReader) in its own thread
+      - Rectification (Stage 1) by LivePipeline
+      - Piece detection (Stage 2) by DetectionWorker threads
+      - Stage 3 logic in subclasses via handle_detection_state
     """
 
     def __init__(
@@ -363,13 +369,13 @@ class BaseLivePipeline(ABC):
 
         # Queues for frames and detection states
         self.frame_queue: "queue.Queue[np.ndarray]" = queue.Queue(
-            maxsize=getattr(config, "FRAME_QUEUE_SIZE", 3)
+            maxsize=getattr(config, "FRAME_QUEUE_SIZE", 3),
         )
         self.det_input_queue: "queue.Queue[np.ndarray]" = queue.Queue(
-            maxsize=getattr(config, "DETECTION_INPUT_QUEUE_SIZE", 1)
+            maxsize=getattr(config, "DETECTION_INPUT_QUEUE_SIZE", 1),
         )
         self.det_output_queue: "queue.Queue[DetectionState]" = queue.Queue(
-            maxsize=getattr(config, "DETECTION_OUTPUT_QUEUE_SIZE", 3)
+            maxsize=getattr(config, "DETECTION_OUTPUT_QUEUE_SIZE", 3),
         )
 
         # Stage 1: board rectifier
@@ -386,7 +392,7 @@ class BaseLivePipeline(ABC):
                 )
             ),
             min_board_area_ratio=float(
-                getattr(config, "AUTO_MIN_BOARD_AREA_RATIO", 0.0)
+                getattr(config, "AUTO_MIN_BOARD_AREA_RATIO", 0.0),
             ),
             display=bool(getattr(config, "GUI_ENABLED", True)),
         )
@@ -427,7 +433,9 @@ class BaseLivePipeline(ABC):
                     weights=getattr(config, "YOLO_PIECE_WEIGHTS"),
                     squares=int(getattr(config, "BOARD_SQUARES", 8)),
                     imgsz=int(getattr(config, "YOLO_PIECE_IMGSZ", 640)),
-                    margin_squares=float(getattr(config, "BOARD_MARGIN_SQUARES", 1.7)),
+                    margin_squares=float(
+                        getattr(config, "BOARD_MARGIN_SQUARES", 1.7),
+                    ),
                     conf_threshold=float(getattr(config, "YOLO_PIECE_CONF", 0.5)),
                     min_iou=float(getattr(config, "MIN_IOU", 0.15)),
                 )
@@ -456,35 +464,38 @@ class BaseLivePipeline(ABC):
     def handle_detection_state(self, state: DetectionState) -> None:
         """
         Called for every DetectionState drained from the Stage 2 queue.
-        Implement Stage 3 logic (move inference etc.) here.
+
+        Subclasses implement their Stage 3 logic here.
         """
         raise NotImplementedError
 
     def after_detection_batch(self) -> None:
         """
         Optional hook that runs once per frame after all DetectionStates
-        have been drained and handle_detection_state has been called on each.
+        have been drained and handle_detection_state has been called.
         """
         return None
 
     def on_start(self) -> None:
         """
-        Hook called after all Stage 1+2 threads have been started,
-        but before entering the main loop. Subclasses can start their
-        own worker threads here.
+        Hook called after Stage 1 and Stage 2 threads have been started,
+        but before entering the main loop.
+
+        Subclasses can start their own worker threads here.
         """
         return None
 
     def on_stop(self) -> None:
         """
-        Hook called during shutdown after Stage 1+2 threads have been
-        requested to stop and joined. Subclasses can clean up additional
-        resources here.
+        Hook called during shutdown after Stage 1 and Stage 2 threads have
+        been requested to stop and joined.
+
+        Subclasses can clean up additional resources here.
         """
         return None
 
     # ------------------------------------------------------------------
-    # Main run/stop logic
+    # Main run and stop logic
     # ------------------------------------------------------------------
 
     def run(self) -> None:
@@ -496,7 +507,6 @@ class BaseLivePipeline(ABC):
 
         self._start_core_threads()
 
-        # Give subclasses a chance to start their own threads
         self.on_start()
 
         _log.info("%s started. Press ESC to stop.", self.__class__.__name__)
@@ -523,13 +533,12 @@ class BaseLivePipeline(ABC):
     def stop(self) -> None:
         self.stop_event.set()
         self._stop_core_threads()
-        # Allow subclasses to clean up their own resources
         self.on_stop()
         destroy_all_windows()
         _log.info("%s stopped cleanly", self.__class__.__name__)
 
     # ------------------------------------------------------------------
-    # Private helpers — orchestration building blocks
+    # Private helpers, orchestration building blocks
     # ------------------------------------------------------------------
 
     def _configure_opencv(self) -> None:
@@ -573,9 +582,10 @@ class BaseLivePipeline(ABC):
         """
         Attempt to get the next frame.
 
-        Returns (frame, finished):
-        - frame: the image array or None if none is currently available
-        - finished: True if the reader thread has ended and no more frames will come
+        Returns tuple (frame, finished):
+          - frame: image array or None if none is currently available
+          - finished: True if the reader thread has ended and no more
+            frames will come
         """
         try:
             return self.frame_queue.get(timeout=1.0), False
@@ -586,10 +596,11 @@ class BaseLivePipeline(ABC):
             return None, False
 
     def _rectify_or_passthrough(self, frame: np.ndarray) -> Optional[np.ndarray]:
-        """Run Stage 1 rectification and return warped board if available, else None.
+        """
+        Run Stage 1 rectification and return warped board if available.
 
-        Also returns None if rectification is not ready; callers can fallback to the
-        original frame for display when this returns None.
+        If rectification is not ready, this returns None and callers can
+        fall back to the original frame.
         """
         return self.pipeline.process_frame(frame)
 
@@ -600,7 +611,6 @@ class BaseLivePipeline(ABC):
         try:
             self.det_input_queue.put_nowait(warped_board)
         except queue.Full:
-            # Drop if workers are busy (we always want the latest frame)
             pass
 
     def _drain_detection_output(self) -> None:
@@ -618,7 +628,9 @@ class BaseLivePipeline(ABC):
             self.handle_detection_state(det_state)
 
     def _compose_display_frame(
-            self, warped_or_raw: Optional[np.ndarray], raw_frame: np.ndarray
+            self,
+            warped_or_raw: Optional[np.ndarray],
+            raw_frame: np.ndarray,
     ) -> Optional[np.ndarray]:
         display_frame = warped_or_raw if warped_or_raw is not None else raw_frame
         if (
@@ -637,7 +649,11 @@ class BaseLivePipeline(ABC):
         return display_frame
 
     def _handle_gui(self, display_frame: Optional[np.ndarray]) -> bool:
-        """Render the current frame and return True if the user requested exit."""
+        """
+        Render the current frame if GUI is enabled.
+
+        Returns True if the user pressed ESC and requested exit.
+        """
         if display_frame is not None:
             show_image(self.window_name, display_frame)
         key = wait_key(1)

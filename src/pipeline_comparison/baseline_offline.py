@@ -1,121 +1,196 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import chess
 
 from src import config
 from src.app_logging import get_logger
-from src.pipeline_comparison.common import PipelineResult
-from src.stage3.baseline_single_frame import SingleFrameBaseline
+from src.pipeline.fen_utils import (
+    detection_state_to_fen,
+    detection_state_to_placement,
+)
+from src.pipeline_comparison.common import (
+    PipelineResult,
+    iter_time_based_should_process,
+)
 from src.types import DetectionState
 
 _log = get_logger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# FEN helpers are provided by src.pipeline.fen_utils
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Baseline runner: reconstruct moves from FEN snapshots
+# ---------------------------------------------------------------------------
+
+
 class _BaselineRunner:
     """
-    Offline Version der SingleFramePipeline.handle_detection_state.
+    Offline move reconstruction based on FEN snapshots of the single frame baseline.
 
-    - Mit Start Gating auf die Anfangsstellung
-    - Jeder von SingleFrameBaseline vorgeschlagene UCI kann gezählt werden
-    - Keine Legalitätschecks; python-chess nur für Startpositions-Erkennung
-    - Debouncing wie in der Live SingleFramePipeline optional über MOVE_MIN_CONFIRM_FRAMES
+    Logic:
+      - Wait until the standard initial position is detected stably.
+      - Keep an internal python chess Board as reference.
+      - For each processed frame:
+          * Build a placement string from detections.
+          * If placement equals the reference board, no move happened.
+          * Otherwise, search all legal moves of the reference board and check
+            which moves lead to the detected placement.
+          * If exactly one move matches, propose that move.
+          * Use debouncing over several frames before confirming a move.
+          * If no unique move exists, mark this as a missing move region and
+            skip the FEN, keeping the reference board unchanged so that later
+            correct FENs can still produce valid moves.
+
+    The runner also keeps a logical move index that counts both confirmed
+    moves and missing move regions. This allows numbering moves as
+
+      (move 7)
+
+    even if only two moves were actually reconstructed and five are missing
+    between them.
     """
 
     def __init__(self) -> None:
-        self.baseline = SingleFrameBaseline()
-        # Hinweis: Kein python-chess Boardtracking in der Single-Frame Baseline.
-        # python-chess wird hier ausschließlich verwendet, um die Startbelegung
-        # (Occupancy) der Anfangsstellung zu bestimmen.
-
-        # Start Gating wie live: warte auf stabile Anfangsstellung
-        self._start_occ: Dict[str, bool] = self._board_to_occupancy(
-            chess.Board()
-        )
+        start_board = chess.Board()
+        self._start_placement: str = start_board.board_fen()
         self._start_seen_frames: int = 0
         self._initialized: bool = False
-        self._min_confirm_frames: int = int(
-            getattr(config, "MOVE_MIN_CONFIRM_FRAMES", 2)
+
+        # Frames required to accept the start position
+        self._min_start_frames: int = int(
+            getattr(config, "START_MIN_CONFIRM_FRAMES", 4),
         )
 
-        # Debouncing für vorgeschlagene Züge
+        # Debouncing for proposed moves
         self._pending_uci: Optional[str] = None
         self._pending_count: int = 0
         self._confirm_frames: int = int(
-            getattr(config, "MOVE_MIN_CONFIRM_FRAMES", 2)
+            getattr(config, "MOVE_MIN_CONFIRM_FRAMES", 2),
         )
 
-    @staticmethod
-    def _board_to_occupancy(board: chess.Board) -> Dict[str, bool]:
-        occ: Dict[str, bool] = {}
-        for sq in chess.SQUARES:
-            occ[chess.square_name(sq)] = board.piece_at(sq) is not None
-        return occ
+        # Current reference board (updated only on confirmed moves)
+        self._board: Optional[chess.Board] = None
+
+        # Missing move statistics
+        self.missing_frames: int = 0
+        self.missing_segments: int = 0
+        self.missing_moves: int = 0
+        self._in_missing_segment: bool = False
+
+        # Logical move index including missing moves
+        # First real move after the initial position has index 1.
+        self._next_ply_index: int = 1
+
+    def _unique_legal_move_to(self, target_placement: str) -> Optional[chess.Move]:
+        """
+        Return the unique legal move that transforms the current reference
+        board into the target placement, or None if there is none or more than one.
+        """
+        if self._board is None:
+            return None
+
+        board = self._board
+        candidates: List[chess.Move] = []
+
+        for move in board.legal_moves:
+            tmp = board.copy()
+            tmp.push(move)
+            if tmp.board_fen() == target_placement:
+                candidates.append(move)
+                if len(candidates) > 1:
+                    # Ambiguous transformation, treat as not reconstructable
+                    return None
+
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
 
     def process_state(
             self,
             state: DetectionState,
             frame_idx: int,
-    ) -> Optional[tuple[str, Optional[str], Optional[str], int]]:
+    ) -> Optional[tuple[str, Optional[str], Optional[str], int, int]]:
         """
-        Verarbeitet einen DetectionState.
+        Process a DetectionState.
 
-        Gibt (uci, san, fen_after, frame_idx) zurück, wenn ein Zug bestätigt ist,
-        sonst None. UCI bleibt erhalten, auch wenn SAN oder FEN nicht berechnet
-        werden können.
+        Returns (uci, san, fen_after, frame_idx, ply_index) once a move
+        is confirmed. Returns None if no move can be confirmed.
+
+        san is left as None since reconstruction is driven only by FEN
+        snapshots. fen_after is the FEN derived from detections.
+        ply_index is the logical move index including missing moves.
         """
-        # 1) Start Gating wie bisher
+        placement = detection_state_to_placement(state)
+
+        # 1) Start gating on the standard initial placement
         if not self._initialized:
-            curr_occ = state.occupancy
-            is_match = all(
-                self._start_occ[sq] == bool(curr_occ.get(sq, False))
-                for sq in self._start_occ
-            )
-            if is_match:
+            if placement == self._start_placement:
                 self._start_seen_frames += 1
-                if self._start_seen_frames >= self._min_confirm_frames:
+                if self._start_seen_frames >= self._min_start_frames:
                     self._initialized = True
-                    self._start_seen_frames = 0
-                    # Baseline auf Startposition setzen
-                    self.baseline.reset(
-                        initial_occ=self._start_occ,
-                        initial_pieces=state.pieces,
-                    )
+                    self._board = chess.Board()
                     self._pending_uci = None
                     self._pending_count = 0
+                    self._in_missing_segment = False
+                    self.missing_frames = 0
+                    self.missing_segments = 0
+                    self.missing_moves = 0
+                    self._next_ply_index = 1
                     _log.info(
                         "[BASELINE OFFLINE] Initial position locked at frame %d",
                         frame_idx,
                     )
-                    return None
             else:
                 if self._start_seen_frames > 0:
                     self._start_seen_frames = 0
             return None
 
-        # 2) Nach dem Gating – SingleFrameBaseline Kandidat holen
-        curr_occ = state.occupancy
-        curr_pieces = state.pieces
-        proposed_uci = self.baseline.update_state(curr_occ, curr_pieces)
+        # From here on, a reference board must exist.
+        assert self._board is not None
 
-        # Kein Kandidat – Pending zurücksetzen
-        if proposed_uci is None:
-            if self._pending_uci is not None:
-                _log.debug(
-                    "[BASELINE OFFLINE] clearing pending move %s at frame %d",
-                    self._pending_uci,
-                    frame_idx,
-                )
+        # 2) No change in placement relative to reference board: no move
+        if placement == self._board.board_fen():
             self._pending_uci = None
             self._pending_count = 0
+            self._in_missing_segment = False
             return None
 
-        # Debouncing wie in der Live Pipeline
-        if self._pending_uci == proposed_uci:
+        # 3) Try to find a unique legal move from the reference board
+        move = self._unique_legal_move_to(placement)
+        if move is None:
+            # Board changed but cannot be explained by a single legal move
+            self._pending_uci = None
+            self._pending_count = 0
+
+            self.missing_frames += 1
+            if not self._in_missing_segment:
+                # New missing segment started
+                self.missing_segments += 1
+                self.missing_moves += 1
+                self._next_ply_index += 1
+                self._in_missing_segment = True
+
+            _log.debug(
+                "[BASELINE OFFLINE] cannot find unique move for frame %d",
+                frame_idx,
+            )
+            return None
+
+        # 4) We have a candidate move, no longer in a missing segment
+        self._in_missing_segment = False
+        uci = move.uci()
+
+        # Debouncing over frames
+        if self._pending_uci == uci:
             self._pending_count += 1
         else:
-            self._pending_uci = proposed_uci
+            self._pending_uci = uci
             self._pending_count = 1
 
         _log.debug(
@@ -129,108 +204,26 @@ class _BaselineRunner:
         if self._pending_count < self._confirm_frames:
             return None
 
-        # Ab hier ist der Zug bestätigt
-        uci = self._pending_uci
-        if uci is None:
-            return None
-
+        # 5) Confirmed move
         self._pending_uci = None
         self._pending_count = 0
 
-        # Baseline Referenz committen
-        self.baseline.commit(curr_occ, curr_pieces)
+        # Apply move on the reference board
+        self._board.push(move)
 
-        # Keine SAN-Berechnung hier – es werden nur UCI Züge ausgegeben.
-        # FEN wird direkt aus der aktuellen Detektion abgeleitet (ohne Legalitätschecks).
         san: Optional[str] = None
-        fen_after: Optional[str] = _state_to_fen(state)
+        fen_after: Optional[str] = detection_state_to_fen(state)
 
-        if san is not None:
-            _log.info(
-                "[BASELINE OFFLINE] frame %d move %s (%s)",
-                frame_idx,
-                san,
-                uci,
-            )
-        else:
-            _log.info(
-                "[BASELINE OFFLINE] frame %d move (UCI only) %s | FEN: %s",
-                frame_idx,
-                uci,
-                fen_after or "",
-            )
+        # Logical move index including missing moves
+        ply_index = self._next_ply_index
+        self._next_ply_index += 1
 
-        return uci, san, fen_after, frame_idx
+        return uci, san, fen_after, frame_idx, ply_index
 
 
-def _state_to_fen(state: DetectionState) -> str:
-    """
-    Erzeugt eine FEN-Zeile aus dem reinen Detektionszustand (Occupancy + Labels).
-
-    Es werden keinerlei Legalitätschecks durchgeführt. Unbekannte/fehlende Labels
-    werden als leere Felder behandelt. Nebeninformationen werden mit Standard-
-    Platzhaltern befüllt (w - - 0 1).
-    """
-    files = ["a", "b", "c", "d", "e", "f", "g", "h"]
-
-    def code_to_fen_char(code: Optional[str]) -> Optional[str]:
-        if not code or len(code) < 2:
-            return None
-        c0 = code[0].lower()
-        c1 = code[1].lower()
-        if c0 not in ("w", "b"):
-            return None
-        if c1 not in ("p", "n", "b", "r", "q", "k"):
-            return None
-        letter = c1.upper() if c0 == "w" else c1
-        return letter
-
-    rows: List[str] = []
-    # Ränge 8 .. 1
-    for rank_idx in range(7, -1, -1):
-        run = 0
-        row_chars: List[str] = []
-        for file_idx in range(8):
-            sq = f"{files[file_idx]}{rank_idx + 1}"
-            occ = bool(state.occupancy.get(sq, False))
-            letter: Optional[str] = None
-            if occ:
-                letter = code_to_fen_char(state.pieces.get(sq))
-
-            if letter is None:
-                run += 1
-            else:
-                if run > 0:
-                    row_chars.append(str(run))
-                    run = 0
-                row_chars.append(letter)
-        if run > 0:
-            row_chars.append(str(run))
-        rows.append("".join(row_chars))
-
-    placement = "/".join(rows)
-    # Platzhalter für Side-to-move, Castling, En passant, Halbzug, Zugnummer
-    return f"{placement} w - - 0 1"
-
-
-def _should_process_frame(
-        frame_idx: int,
-        video_fps: float | None,
-        detector_fps: float | None,
-) -> bool:
-    """
-    Entscheidet, ob ein Frame in die Offline Baseline eingespeist wird.
-
-    Wenn video_fps und detector_fps vorhanden sind, wird ein einfaches
-    Sampling verwendet, damit nur so viele Frames verarbeitet werden, wie
-    der Detektor im Live Betrieb ungefähr schaffen würde.
-    """
-    if video_fps is None or detector_fps is None or detector_fps <= 0.0:
-        return True
-
-    ratio = video_fps / detector_fps if detector_fps > 0 else 1.0
-    step = max(1, int(round(ratio)))
-    return frame_idx % step == 0
+# ---------------------------------------------------------------------------
+# Public runner
+# ---------------------------------------------------------------------------
 
 
 def run_baseline(
@@ -240,13 +233,17 @@ def run_baseline(
         detector_fps: float | None = None,
 ) -> PipelineResult:
     """
-    Offline Single Frame Baseline mit Start Gating und Debouncing.
+    Offline single frame baseline with FEN based move reconstruction.
 
-    - Verwendet dieselbe SingleFrameBaseline Logik wie die Live Pipeline
-    - Nutzt Start Gating auf die Anfangsstellung
-    - Nutzt Debouncing über MOVE_MIN_CONFIRM_FRAMES Frames
-    - Optional werden bei vorhandenen FPS Metadaten nur die Frames
-      verarbeitet, die der Detektor realistischerweise schaffen würde
+    Per frame FENs and reconstructed moves are collected in the returned
+    PipelineResult. Detailed logging of selected FENs is handled by the
+    comparison driver.
+
+    If video_fps and detector_fps are provided and detector_fps < video_fps,
+    a time based live sampling approximation is used. The detector is modeled
+    as a worker that needs 1 / detector_fps seconds per frame and only accepts
+    a new frame once it is free again. This simulates a queue of size 1 and
+    is closer to real live processing.
     """
     runner = _BaselineRunner()
 
@@ -257,23 +254,43 @@ def run_baseline(
 
     total_frames = len(states)
 
-    for idx, state in enumerate(states):
-        # Optionales Live Stil Sampling
-        if _should_process_frame(idx, video_fps, detector_fps):
-            _log.debug(
-                "[BASELINE OFFLINE] processing frame %d/%d",
-                idx + 1,
-                total_frames,
-            )
-            info = runner.process_state(state, idx)
-            if info is not None:
-                uci, san, fen_after, frame_idx = info
-                moves_uci.append(uci)
-                moves_san.append(san or "")
-                move_frames.append(frame_idx)
+    # Unified iteration using time-based gating helper
+    for idx, should_process in iter_time_based_should_process(
+            video_fps, detector_fps, total_frames
+    ):
+        state = states[idx]
 
-        # Für jede Original Frame Position einen FEN-String aus der Detektion ableiten
-        frame_fens.append(_state_to_fen(state))
+        # FEN snapshot for every frame
+        fen_for_frame = detection_state_to_fen(state)
+        frame_fens.append(fen_for_frame)
+
+        _log.debug(
+            "[BASELINE OFFLINE] processing frame %d/%d",
+            idx + 1,
+            total_frames,
+        )
+
+        info = runner.process_state(state, idx) if should_process else None
+        if info is None:
+            continue
+
+        uci, san, _fen_after, frame_idx, _ply_index = info
+        moves_uci.append(uci)
+        moves_san.append(san or "")
+        move_frames.append(frame_idx)
+
+    if not runner._initialized:
+        _log.info(
+            "[BASELINE OFFLINE] initial position was never locked, "
+            "no moves reconstructed",
+        )
+    else:
+        _log.info(
+            "[BASELINE OFFLINE] missing move segments=%d, frames=%d, moves=%d",
+            runner.missing_segments,
+            runner.missing_frames,
+            runner.missing_moves,
+        )
 
     return PipelineResult(
         frame_fens=frame_fens,

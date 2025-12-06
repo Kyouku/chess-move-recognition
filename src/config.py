@@ -13,21 +13,23 @@ CALIBRATION_DIR: Path = _SRC_DIR / "pipeline" / "calibration"
 GAME_MOVES_DIR: Path = _SRC_DIR / "pipeline" / "moves_log"
 
 # Input source
-# Note: The live app now automatically probes the actual source dimensions.
-# FRAME_WIDTH/HEIGHT are only used as a fallback if probing fails.
+# The live app automatically probes the actual source dimensions.
+# FRAME_WIDTH/HEIGHT are only used as fallbacks if probing fails.
 CAMERA_INDEX: int = 1
-FRAME_WIDTH: int = 3840  # fallback only; actual capture size is probed at runtime
-FRAME_HEIGHT: int = 2160  # fallback only; actual capture size is probed at runtime
+FRAME_WIDTH: int = 3840  # fallback only
+FRAME_HEIGHT: int = 2160  # fallback only
 
-# Actual source size detected at runtime (exposed for downstream users)
+# Actual source size detected at runtime
 ACTUAL_FRAME_WIDTH: int = FRAME_WIDTH
 ACTUAL_FRAME_HEIGHT: int = FRAME_HEIGHT
 
 
 def set_actual_frame_size(width: int, height: int) -> None:
     """
-    Update the probed source size. Downstream stages can read
-    config.ACTUAL_FRAME_WIDTH/HEIGHT to know the real input geometry.
+    Update the probed source size.
+
+    Downstream stages can read ACTUAL_FRAME_WIDTH and ACTUAL_FRAME_HEIGHT
+    to know the real input geometry.
     """
     global ACTUAL_FRAME_WIDTH, ACTUAL_FRAME_HEIGHT
     ACTUAL_FRAME_WIDTH = int(width)
@@ -39,32 +41,30 @@ BOARD_SIZE_PX: int = 640
 BOARD_SQUARES: int = 8
 BOARD_MARGIN_SQUARES: float = 1.7
 
+# Source selection
 USE_VIDEO_FILE: bool = True
-# Default sample video resolved under project data/videos
-VIDEO_PATH: Path = VIDEOS_DIR / "game3.mp4"
+VIDEO_PATH: Path = VIDEOS_DIR / "game2.mp4"
 
 # Calibration
 CALIBRATION_MAX_FRAMES: int = 500
 AUTO_MIN_BOARD_AREA_RATIO: float = 0.08
-# Whether to load a previously saved homography instead of calibrating
 USE_SAVED_HOMOGRAPHY: bool = True
-# Where to save/load the homography matrix (NumPy .npy file)
 HOMOGRAPHY_PATH: Path = CALIBRATION_DIR / "homography.npy"
-# Preprocessing size for Stage1 (auto/manual calibration and rectification)
-# The camera can capture at 4 K, but corner detection works more reliably and
-# faster on a moderately sized preprocessed image. The rectifier will use this
-# long-edge size consistently both during calibration and runtime.
 CALIBRATION_TARGET_LONG_EDGE: int = BOARD_SIZE_PX
 
 # Parallel detection workers
 DETECTION_WORKERS: int = 1
 
-# Logging (resolve under src/pipeline/pipeline_comparison)
+# Logging for multistage move tracker
 MOVES_LOG_PATH: Path = GAME_MOVES_DIR / "moves.log"
 GAME_MOVES_TXT_PATH: Path = GAME_MOVES_DIR / "game_moves.txt"
 
-# YOLO based piece detector for stage2
-# Resolve models directory relative to the project root
+# Logging for single frame FEN baseline
+FEN_LOG_PATH: Path = GAME_MOVES_DIR / "baseline_fens.txt"
+START_MIN_CONFIRM_FRAMES: int = 4
+FEN_MIN_STABLE_FRAMES: int = 10
+
+# YOLO based piece detector for stage 2
 YOLO_PIECE_WEIGHTS: Path = MODELS_DIR / f"yolo11s_best_{BOARD_SIZE_PX}.onnx"
 YOLO_PIECE_IMGSZ: int = BOARD_SIZE_PX
 YOLO_PIECE_CONF: float = 0.15
@@ -73,14 +73,9 @@ MIN_IOU: float = 0.15
 # UI
 DISPLAY_WINDOW_NAME: str = "Board"
 GUI_ENABLED: bool = True
-OPENCV_NUM_THREADS: int = 0  # 0 = OpenCV decides; >0 to force a limit
+OPENCV_NUM_THREADS: int = 0  # 0 lets OpenCV decide, >0 forces a limit
 
-# Move tracker settings
-# Tuned for better recall in multistage while keeping stability.
-# Alpha controls responsiveness of the temporal occupancy filter.
-# Threshold is the probability cutoff for considering a square occupied.
-# min_confirm_frames is the number of consecutive frames the same candidates
-# must persist before confirming a move.
+# Move tracker settings (used by multistage pipeline)
 MOVE_FILTER_ALPHA: float = 0.5
 MOVE_FILTER_THRESHOLD: float = 0.60
 MOVE_MIN_CONFIRM_FRAMES: int = 3
@@ -93,7 +88,7 @@ DETECTION_OUTPUT_QUEUE_SIZE: int = 3
 MOVE_IN_QUEUE_SIZE: int = 8
 MOVE_OUT_QUEUE_SIZE: int = 64
 
-# Which live pipeline should run?
-# "multistage" -> MoveTracker with temporal filter
-# "singleframe" -> SingleFrameBaseline without history
+# Which live pipeline should run by default:
+# "multistage" for full temporal tracker
+# "singleframe" for FEN only baseline
 PIPELINE_MODE: str = "singleframe"

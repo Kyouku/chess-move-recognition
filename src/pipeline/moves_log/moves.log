@@ -690,3 +690,8 @@ d5c4;;r1bqkb1r/pp1n1ppp/2p1pn2/8/2pP4/2NBPN2/PP3PPP/R1BQK2R w - - 0 1
 d2d4;;rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBKKBNR w - - 0 1
 d7d5;;rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBKKBNR w - - 0 1
 c2c4;;rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR w - - 0 1
+d2d4;d4;rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR w - - 0 1
+d7d5;d5;rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w - - 0 1
+c2c4;c4;rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR w - - 0 1
+c7c6;c6;rnbqkbnr/pp2pppp/2p5/3p4/2PP4/8/PP2PPPP/RNBQKBNR w - - 0 1
+g1f3;Nf3;rnbqkbnr/pp2pppp/2p5/3p4/2PP4/5N2/PP2PPPP/RNBQKB1R w - - 0 1

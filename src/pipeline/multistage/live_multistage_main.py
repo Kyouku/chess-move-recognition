@@ -6,7 +6,7 @@ from typing import Optional, Tuple, Dict, List
 
 from src import config
 from src.app_logging import get_logger, set_log_level
-from src.chess_io import write_moves_txt
+from src.chess_io import write_moves_txt, append_move_log
 from src.pipeline.live_base import (
     BaseLivePipeline,
     get_capture_source,
@@ -17,26 +17,9 @@ from src.types import MoveInfo, DetectionState
 
 _log = get_logger(__name__)
 
-
-def _append_move_log(info: MoveInfo) -> None:
-    """Append a single move to the CSV-like log file as uci;san;fen. Errors are non-fatal."""
-    try:
-        # Ensure directory exists
-        try:
-            config.MOVES_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        uci = getattr(info.move, "uci", lambda: "")()
-        san = getattr(info, "san", None) or ""
-        fen_after = getattr(info, "fen_after", None) or ""
-        with open(config.MOVES_LOG_PATH, "a", encoding="utf8") as f:
-            f.write(f"{uci};{san};{fen_after}\n")
-    except OSError as e:
-        _log.warning(
-            "Could not append move to log file %s: %s",
-            config.MOVES_LOG_PATH,
-            e,
-        )
+"""
+Move logging is handled by src.chess_io.append_move_log for reuse across modules.
+"""
 
 
 class MultiStagePipeline(BaseLivePipeline):
@@ -124,7 +107,7 @@ class MultiStagePipeline(BaseLivePipeline):
             self.moves.append(info.san)
 
             # Optional file logging (non-fatal on errors)
-            _append_move_log(info)
+            append_move_log(info)
 
             # Reset ONLY on checkmate; ignore draws
             if getattr(info, "is_checkmate", False):

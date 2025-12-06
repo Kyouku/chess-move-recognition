@@ -11,6 +11,7 @@ import numpy as np
 
 from src import config
 from src.app_logging import get_logger
+from src.io_utils import ensure_parent_dir
 from src.stage1.board_rectifier import LivePipeline
 from src.stage2.piece_detection import PieceDetector
 from src.types import DetectionState
@@ -24,13 +25,6 @@ class DetectionLog:
     video_fps: Optional[float]
     detector_fps: Optional[float]
 
-
-def _ensure_parent_dir(path: Path) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        # Best effort: log and continue; subsequent file I/O may still fail.
-        _log.warning("Could not ensure parent dir for %s: %s", path, exc)
 
 
 def record_detections(
@@ -49,7 +43,7 @@ def record_detections(
         "video_path": str,
         "detections": List[DetectionState],
         "video_fps": float,
-        "detector_fps": float,
+        "detector_fps": float
       }
     """
     video_path = Path(video_path)
@@ -60,21 +54,22 @@ def record_detections(
         raise RuntimeError(f"Could not open video {video_path}")
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or int(
-        getattr(config, "FRAME_WIDTH", 1280)
+        getattr(config, "FRAME_WIDTH", 1280),
     )
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or int(
-        getattr(config, "FRAME_HEIGHT", 720)
+        getattr(config, "FRAME_HEIGHT", 720),
     )
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
-    # Try to read the nominal video FPS. If missing, fall back to config or 30.
+    # Nominal video FPS, with fallback
     raw_fps = cap.get(cv2.CAP_PROP_FPS)
     if raw_fps and raw_fps > 0:
         video_fps = float(raw_fps)
     else:
         video_fps = float(getattr(config, "VIDEO_FPS", 30.0))
         _log.warning(
-            "CAP_PROP_FPS not available, falling back to VIDEO_FPS=%.2f", video_fps
+            "CAP_PROP_FPS not available, falling back to VIDEO_FPS=%.2f",
+            video_fps,
         )
 
     pipeline = LivePipeline(
@@ -87,10 +82,10 @@ def record_detections(
                 config,
                 "CALIBRATION_TARGET_LONG_EDGE",
                 max(width, height),
-            )
+            ),
         ),
         min_board_area_ratio=float(
-            getattr(config, "AUTO_MIN_BOARD_AREA_RATIO", 0.0)
+            getattr(config, "AUTO_MIN_BOARD_AREA_RATIO", 0.0),
         ),
         display=False,
     )
@@ -115,7 +110,11 @@ def record_detections(
                     h_file = Path(h_path)
                     if h_file.exists():
                         H = np.load(str(h_file))
-                        if isinstance(H, np.ndarray) and H.shape == (3, 3) and np.isfinite(H).all():
+                        if (
+                                isinstance(H, np.ndarray)
+                                and H.shape == (3, 3)
+                                and np.isfinite(H).all()
+                        ):
                             pipeline._H_board = H.astype(np.float32)  # type: ignore[attr-defined]
                             pipeline._is_calibrated = True  # type: ignore[attr-defined]
                             _log.info("Loaded saved homography from %s", h_file)
@@ -130,10 +129,13 @@ def record_detections(
                             "Configured to use saved homography, but file not found at %s; calibrating.",
                             h_file,
                         )
-                except Exception as exc:  # noqa: BLE001
-                    _log.warning("Failed to load saved homography: %s; calibrating instead.", exc)
+                except Exception as exc:
+                    _log.warning(
+                        "Failed to load saved homography: %s; calibrating instead.",
+                        exc,
+                    )
     except Exception:
-        # If config attributes are missing or any error occurs, just proceed with calibration
+        # Configuration is optional, fall back to calibration below
         pass
 
     # Calibrate if no valid saved homography was used
@@ -152,7 +154,12 @@ def record_detections(
             use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
             h_path = getattr(config, "HOMOGRAPHY_PATH", None)
             H = getattr(pipeline, "_H_board", None)
-            if use_saved and h_path is not None and isinstance(H, np.ndarray) and H.shape == (3, 3):
+            if (
+                    use_saved
+                    and h_path is not None
+                    and isinstance(H, np.ndarray)
+                    and H.shape == (3, 3)
+            ):
                 h_file = Path(h_path)
                 try:
                     h_file.parent.mkdir(parents=True, exist_ok=True)
@@ -160,7 +167,6 @@ def record_detections(
                     pass
                 try:
                     np.save(str(h_file), H)
-                    # Verify quickly
                     try:
                         H_chk = np.load(str(h_file))
                         if isinstance(H_chk, np.ndarray) and H_chk.shape == (3, 3):
@@ -172,9 +178,17 @@ def record_detections(
                                 getattr(H_chk, "shape", None),
                             )
                     except Exception as exc:
-                        _log.warning("Homography save verification failed for %s: %s", h_file, exc)
+                        _log.warning(
+                            "Homography save verification failed for %s: %s",
+                            h_file,
+                            exc,
+                        )
                 except Exception as exc:
-                    _log.warning("Failed to save homography to %s: %s", h_file, exc)
+                    _log.warning(
+                        "Failed to save homography to %s: %s",
+                        h_file,
+                        exc,
+                    )
         except Exception:
             # Do not fail the recording if saving failed
             pass
@@ -182,14 +196,9 @@ def record_detections(
     # Rewind to start for detection pass
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
-    # Log planned pass length
-    limit_txt = (
-        f"{max_frames} frames" if max_frames is not None else "all frames"
-    )
+    limit_txt = f"{max_frames} frames" if max_frames is not None else "all frames"
     total_txt = f"/~{total_frames} total" if total_frames > 0 else ""
-    _log.info(
-        "Starting detection pass over %s%s", limit_txt, total_txt
-    )
+    _log.info("Starting detection pass over %s%s", limit_txt, total_txt)
 
     detections: List[DetectionState] = []
     frame_idx = 0
@@ -206,8 +215,6 @@ def record_detections(
 
         frame_idx += 1
 
-        # Process frame to update pipeline state; output is accessed via
-        # pipeline.last_warped_board.
         pipeline.process_frame(frame)
         warped_board = pipeline.last_warped_board
 
@@ -218,7 +225,7 @@ def record_detections(
                     pieces={},
                     boxes={},
                     confidences={},
-                )
+                ),
             )
             continue
 
@@ -229,10 +236,9 @@ def record_detections(
                 pieces=pieces,
                 boxes=boxes,
                 confidences=confs,
-            )
+            ),
         )
 
-        # Periodic progress report (INFO so it is visible by default)
         if frame_idx % max(1, report_interval) == 0:
             now = time.perf_counter()
             elapsed = now - t_start
@@ -254,7 +260,6 @@ def record_detections(
                 )
 
     cap.release()
-    # Final progress log with FPS
     elapsed_total = max(1e-6, time.perf_counter() - t_start)
     fps_final = frame_idx / elapsed_total
     _log.info(
@@ -264,7 +269,7 @@ def record_detections(
         fps_final,
     )
 
-    _ensure_parent_dir(out_path)
+    ensure_parent_dir(out_path)
     payload = {
         "video_path": str(video_path),
         "detections": detections,
@@ -288,12 +293,11 @@ def load_detections(path: str | Path) -> DetectionLog:
     with path.open("rb") as f:
         payload = pickle.load(f)
 
-    # New format: dict with detections + meta
     if isinstance(payload, dict) and "detections" in payload:
         detections = payload["detections"]
         if not isinstance(detections, list):
             raise ValueError(
-                f"Unexpected 'detections' entry type in {path}: {type(detections)}"
+                f"Unexpected 'detections' entry type in {path}: {type(detections)}",
             )
 
         video_fps_raw = payload.get("video_fps")
@@ -315,7 +319,6 @@ def load_detections(path: str | Path) -> DetectionLog:
             detector_fps=detector_fps,
         )
 
-    # Backward compatible: plain list of DetectionState
     if isinstance(payload, list):
         return DetectionLog(
             detections=payload,
