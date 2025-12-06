@@ -1,4 +1,6 @@
-# === BASE PYTHON / BUILD IGNORE ===
+# ============================
+# PYTHON / BUILD ARTIFACTS
+# ============================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -9,6 +11,8 @@ dist/
 *.egg-info/
 *.manifest
 *.spec
+
+# Test and coverage
 htmlcov/
 .tox/
 .coverage*
@@ -17,6 +21,8 @@ htmlcov/
 .mypy_cache/
 .pytype/
 .dmypy.json
+
+# Environments
 env/
 venv/
 .venv/
@@ -24,45 +30,54 @@ ENV/
 env.bak/
 venv.bak/
 
-# === JUPYTER / NOTEBOOKS ===
+# ============================
+# JUPYTER / NOTEBOOKS
+# ============================
 .ipynb_checkpoints/
 *.nbconvert.ipynb
 notebooks/.ipynb_checkpoints/
 notebooks/.ipynb_cache/
 
-# === DATA & MODEL FILES ===
-# (Large or local-only data that should not be committed)
+# ============================
+# DATA AND MODELS
+# ============================
+# Large or local only data that should not be committed
 data/raw/
-data/images/processed_images/
-data/images/raw_images/
+data/gt/
+data/images/
 data/videos/
 data/saved_h_cache/
 data/labels/
 data/tmp/
 datasets/
-models/
+models/*
+!models/scripts/
+!models/scripts/**
 runs/
 weights/
 results/
-*.pt               # YOLO weight files
-*.onnx             # exported models
+
+# Generic large binary artifacts
+*.pt          # YOLO weight files
+*.onnx        # exported models
 *.tflite
 *.engine
 *.log
-*.csv              # generated evaluation logs
-*.json             # generated predictions / eval outputs
-*.yaml             # config exports (keep only your template)
+*.csv         # generated evaluation logs
+*.json        # generated predictions or eval outputs
+*.yaml        # config exports (keep only templates you need)
 
-# Project-specific training artifacts
-training/
+# Project specific training artifacts
+training/yolo11_runs
+training/yolo11_runs/*
 
-# Live run artifacts (game detections/detected_moves)
-src/pipeline/game_moves/*.log
-src/pipeline/game_moves/*.txt
-pipeline/game_moves/*.log
-pipeline/game_moves/*.txt
+# Live run artifacts (game detections and detected moves)
+data/detected_moves/
+data/detections/
 
-# === VIDEO & IMAGE CAPTURE ===
+# ============================
+# VIDEO AND IMAGE CAPTURE
+# ============================
 *.mp4
 *.mov
 *.avi
@@ -73,7 +88,9 @@ pipeline/game_moves/*.txt
 *.bmp
 *.tiff
 
-# === EXPERIMENT / EVAL OUTPUTS ===
+# ============================
+# EXPERIMENT AND EVAL OUTPUTS
+# ============================
 output/
 outputs/
 eval/
@@ -86,42 +103,43 @@ lightning_logs/
 checkpoints/
 __results__/
 
-# === IDE / EDITOR ===
-# VS Code, JetBrains, and others
+# ============================
+# IDE AND EDITOR FILES
+# ============================
 .vscode/
 .idea/
 *.code-workspace
 *.sublime-project
 *.sublime-workspace
 
-# === SYSTEM / OS SPECIFIC ===
+# ============================
+# SYSTEM FILES
+# ============================
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# === PRE-COMMIT / DEV TOOLING ===
+# ============================
+# PRE COMMIT / DEV TOOLING
+# ============================
 .ruff_cache/
 .pre-commit-config.yaml.bak
 
-# === ENV / SECRETS ===
+# ============================
+# ENV / SECRETS
+# ============================
 .env
 .env.*
 *.env
 .python-version
 
-# === COVERAGE / REPORTS ===
+# ============================
+# COVERAGE / REPORTS
+# ============================
 coverage.xml
 
-# === GIT-LFS (optional large files placeholder) ===
+# ============================
+# GIT LFS (optional examples)
+# ============================
 # *.pt filter=lfs diff=lfs merge=lfs -text
 # *.mp4 filter=lfs diff=lfs merge=lfs -text
-
-# === GLOBAL OVERRIDE: keep only src/ tracked ===
-# Interpret request: only the src/ directory should be visible to Git by default.
-# Existing tracked files are unaffected by .gitignore rules.
-/*
-!.gitignore
-!/src/
-!/src/**
-/model_training/
-/model_comparison/
