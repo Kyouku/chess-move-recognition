@@ -18,7 +18,7 @@ def _square_name(rank_idx: int, file_idx: int) -> str:
     """
     Map (rank_idx, file_idx) to a square like "a1".
 
-    Convention (naming preserved for backward compatibility):
+    Convention (kept for backward compatibility):
       - rank_idx: 0..squares-1 maps across files 'a'.. (columns, left to right)
       - file_idx: 0..squares-1 maps across ranks '1'.. (rows, bottom to top)
     """
@@ -34,6 +34,9 @@ class PieceDetector:
     Each YOLO box is assigned to the board square with the highest IoU
     (intersection over union) overlap. The original YOLO boxes per
     occupied square are stored as well so an overlay can draw them.
+
+    The detector maintains a per square memory so that occupancy is
+    "sticky" over a small number of missing detections to avoid flicker.
     """
 
     def __init__(
@@ -71,15 +74,15 @@ class PieceDetector:
         self._step_y: float = 0.0
         self._off_x: float = 0.0
         self._off_y: float = 0.0
+
         # Precompute board geometry and related caches
         self._squares_list: List[str] = []
         self._square_items: List[Tuple[str, np.ndarray]] = []
         self._init_board_geometry()
 
-        # Cache class-id to compact label mapping once (avoids per-frame string ops)
-        # ultralytics stores mapping in model.names: Dict[int, str]
+        # Cache class id to compact label mapping once (avoids per frame string ops)
+        # ultralytics stores mapping in model.names: Dict[int, str] or list[str]
         try:
-            # Some YOLO versions expose .names as list or dict; normalize to dict[int, str]
             if isinstance(self._yolo_model.names, dict):
                 names_map = {int(k): str(v) for k, v in self._yolo_model.names.items()}
             else:
@@ -92,7 +95,7 @@ class PieceDetector:
             code = _piece_code_from_label(name) or name
             self._class_code_map[int(cid)] = str(code)
 
-        # Persisted per-square state to implement confidence-aware, sticky occupancy.
+        # Persisted per square state to implement confidence aware, sticky occupancy
         # Initialized on first detect() call.
         self._mem_pieces: Optional[Dict[str, Optional[str]]] = None
         self._mem_occupancy: Optional[Dict[str, bool]] = None
@@ -126,19 +129,19 @@ class PieceDetector:
             raise ValueError("Empty board image in PieceDetector.detect")
 
         if board_bgr.shape[0] != self.imgsz or board_bgr.shape[1] != self.imgsz:
-            # Choose interpolation based on scaling direction (AREA for shrink, LINEAR for enlarge)
+            # Choose interpolation based on scaling direction
             h0, w0 = board_bgr.shape[:2]
             target_area = float(self.imgsz * self.imgsz)
             src_area = float(w0 * h0)
             interp = cv2.INTER_AREA if target_area < src_area else cv2.INTER_LINEAR
             board_bgr = cv2.resize(board_bgr, (self.imgsz, self.imgsz), interpolation=interp)
 
-        # Initialize raw per-frame accumulation (best per square in this frame)
+        # Initialize raw per frame accumulation (best per square in this frame)
         raw_pieces: Dict[str, Optional[str]] = dict.fromkeys(self._squares_list, None)
         raw_occupancy: Dict[str, bool] = dict.fromkeys(self._squares_list, False)
         best_conf_per_square: Dict[str, float] = {sq: -1.0 for sq in self._squares_list}
         raw_boxes: Dict[str, Optional[Tuple[float, float, float, float]]] = dict.fromkeys(
-            self._squares_list, None
+            self._squares_list, None,
         )
         raw_conf: Dict[str, Optional[float]] = dict.fromkeys(self._squares_list, None)
 
@@ -151,17 +154,13 @@ class PieceDetector:
             augment=False,
         )[0]
 
-        if results.boxes is None or len(results.boxes) == 0:
-            # No detections this frame; use memory with miss handling below
-            pass
-
         if results.boxes is not None and len(results.boxes) > 0:
             boxes = results.boxes
             xyxy = boxes.xyxy.cpu().numpy()
             cls_ids = boxes.cls.cpu().numpy().astype(int)
             confs = boxes.conf.cpu().numpy()
 
-            # process highest confidence first, like your notebook code picking best match
+            # Process highest confidence first
             order = np.argsort(-confs)
 
             for idx in order:
@@ -175,16 +174,19 @@ class PieceDetector:
                 x1_adj, y1_adj, x2_adj, y2_adj = self._adjust_tall_box(x1, y1, x2, y2)
 
                 best_sq, best_iou = self._assign_box_to_square_iou(
-                    x1_adj, y1_adj, x2_adj, y2_adj
+                    x1_adj,
+                    y1_adj,
+                    x2_adj,
+                    y2_adj,
                 )
                 if best_sq is None or best_iou < self.min_iou:
                     continue
 
-                # keep only highest confidence detection per square
+                # Keep only highest confidence detection per square
                 if conf <= best_conf_per_square[best_sq]:
                     continue
 
-                # Map class id to compact code like "wP", "bN" using precomputed map
+                # Map class id to compact code like "wP", "bN"
                 cls_name = self._class_code_map.get(int(cls_ids[idx]), str(int(cls_ids[idx])))
                 best_conf_per_square[best_sq] = conf
                 raw_pieces[best_sq] = cls_name
@@ -206,7 +208,7 @@ class PieceDetector:
         assert self._mem_conf is not None
         assert self._miss_counts is not None
 
-        # Merge raw detections with memory using confidence-aware sticky logic
+        # Merge raw detections with memory using confidence aware sticky logic
         merged_pieces: Dict[str, Optional[str]] = {}
         merged_occupancy: Dict[str, bool] = {}
         merged_boxes: Dict[str, Optional[Tuple[float, float, float, float]]] = {}
@@ -284,13 +286,13 @@ class PieceDetector:
         """
         img_w = float(self.imgsz)
         img_h = float(self.imgsz)
-        m = self.margin_squares
+        margin = self.margin_squares
 
-        if m > 0.0:
-            step_x = img_w / (self.squares + 2.0 * m)
-            step_y = img_h / (self.squares + 2.0 * m)
-            off_x = step_x * m
-            off_y = step_y * m
+        if margin > 0.0:
+            step_x = img_w / (self.squares + 2.0 * margin)
+            step_y = img_h / (self.squares + 2.0 * margin)
+            off_x = step_x * margin
+            off_y = step_y * margin
         else:
             step_x = img_w / self.squares
             step_y = img_h / self.squares
@@ -306,9 +308,12 @@ class PieceDetector:
         self._off_y = off_y
 
         self._square_boxes = _compute_square_boxes(
-            int(img_w), int(img_h), self.squares, m
+            int(img_w),
+            int(img_h),
+            self.squares,
+            margin,
         )
-        # Keep a cached list of square keys and items for faster iterations
+        # Cached lists for faster iterations
         self._squares_list = list(self._square_boxes.keys())
         self._square_items = list(self._square_boxes.items())
 
@@ -320,23 +325,19 @@ class PieceDetector:
             y2: float,
     ) -> Tuple[float, float, float, float]:
         """
-        Mimic the notebook heuristic:
+        Heuristic to crop very tall boxes from the top.
 
-          if box_height > 60:
-              y1 += 40
-
-        but scaled with the board size so it still works if imgsz is not 640.
+        Scales the 60 and 40 pixel thresholds from a 640 board to the
+        current imgsz so behavior is roughly invariant to resolution.
         """
         h_box = max(1.0, y2 - y1)
 
-        # Scale the 60 and 40 from your notebook from a 640 board to current imgsz
         scale = float(self.imgsz) / 640.0
         tall_thr = 60.0 * scale
         crop_px = 40.0 * scale
 
         if h_box > tall_thr:
             new_y1 = y1 + crop_px
-            # clamp to image
             new_y1 = min(new_y1, self._img_h - 1.0)
             return x1, new_y1, x2, y2
 
@@ -354,7 +355,9 @@ class PieceDetector:
             y2: float,
     ) -> Tuple[Optional[str], float]:
         """
-        Pure IoU assignment to all squares, like calculate_iou(box, square).
+        Pure IoU assignment to all squares.
+
+        Returns the square name and the best IoU value.
         """
         box = np.array([x1, y1, x2, y2], dtype=np.float32)
 
@@ -362,9 +365,9 @@ class PieceDetector:
         best_iou: float = 0.0
 
         for sq, cell in self._square_items:
-            iou = self._iou(box, cell)
-            if iou > best_iou:
-                best_iou = iou
+            iou_val = self._iou(box, cell)
+            if iou_val > best_iou:
+                best_iou = iou_val
                 best_sq = sq
 
         return best_sq, best_iou
@@ -373,9 +376,6 @@ class PieceDetector:
     def _iou(box: np.ndarray, cell: np.ndarray) -> float:
         """
         Intersection over union for two axis aligned boxes in [x1, y1, x2, y2] format.
-
-        This is equivalent to Polygon IoU for rectangles,
-        just without the shapely dependency.
         """
         x1 = max(float(box[0]), float(cell[0]))
         y1 = max(float(box[1]), float(cell[1]))
@@ -390,10 +390,12 @@ class PieceDetector:
             return 0.0
 
         box_area = max(0.0, (float(box[2]) - float(box[0]))) * max(
-            0.0, (float(box[3]) - float(box[1]))
+            0.0,
+            (float(box[3]) - float(box[1])),
         )
         cell_area = max(0.0, (float(cell[2]) - float(cell[0]))) * max(
-            0.0, (float(cell[3]) - float(cell[1]))
+            0.0,
+            (float(cell[3]) - float(cell[1])),
         )
 
         if box_area <= 0.0 or cell_area <= 0.0:

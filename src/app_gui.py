@@ -7,7 +7,7 @@ import cv2
 try:
     from src.pipeline.multistage import config as _config
 except ImportError:
-    # Ensure _config is defined even if import fails to satisfy linters/type checkers
+    # Ensure _config is defined even if import fails to satisfy linters and type checkers
     _config = None  # type: ignore[assignment]
     _DEFAULT_ENABLED = True
 else:
@@ -54,7 +54,10 @@ def wait_key(delay_ms: int = 1) -> int:
     return cv2.waitKey(delay_ms) & 0xFF
 
 
-def set_mouse_callback(name: str, callback: Callable[[int, int, int, int, Any], None]) -> None:
+def set_mouse_callback(
+        name: str,
+        callback: Callable[[int, int, int, int, Any], None],
+) -> None:
     if not _GUI_ENABLED:
         return
     cv2.setMouseCallback(name, callback)

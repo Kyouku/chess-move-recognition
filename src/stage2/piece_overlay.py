@@ -29,13 +29,13 @@ def _compute_square_boxes(
     Precompute pixel regions for all squares in the board image.
     Must match the geometry in PieceDetector.
     """
-    m = float(margin_squares)
+    margin = float(margin_squares)
 
-    if m > 0.0:
-        step_x = img_w / (squares + 2.0 * m)
-        step_y = img_h / (squares + 2.0 * m)
-        off_x = step_x * m
-        off_y = step_y * m
+    if margin > 0.0:
+        step_x = img_w / (squares + 2.0 * margin)
+        step_y = img_h / (squares + 2.0 * margin)
+        off_x = step_x * margin
+        off_y = step_y * margin
     else:
         step_x = img_w / squares
         step_y = img_h / squares

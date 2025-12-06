@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Utilities for recording and loading DetectionState logs for offline comparison.
+
+record_detections runs Stage 1 and Stage 2 on a video once and stores
+DetectionState objects together with basic metadata. load_detections
+wraps that data in a DetectionLog dataclass.
+"""
+
 import pickle
 import time
 from dataclasses import dataclass
@@ -7,10 +15,13 @@ from pathlib import Path
 from typing import List, Optional
 
 import cv2
-import numpy as np
 
 from src import config
 from src.common.app_logging import get_logger
+from src.common.homography_cache import (
+    apply_saved_homography,
+    save_homography_from_pipeline,
+)
 from src.common.io_utils import ensure_parent_dir
 from src.common.types import DetectionState
 from src.stage1.board_rectifier import LivePipeline
@@ -21,10 +32,20 @@ _log = get_logger(__name__)
 
 @dataclass
 class DetectionLog:
+    """
+    Recorded detection log for a single video.
+
+    detections:
+        List of DetectionState objects, one per processed frame.
+    video_fps:
+        Nominal video frames per second if known.
+    detector_fps:
+        Effective processing speed during recording.
+    """
+
     detections: List[DetectionState]
     video_fps: Optional[float]
     detector_fps: Optional[float]
-
 
 
 def record_detections(
@@ -61,7 +82,7 @@ def record_detections(
     )
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
-    # Nominal video FPS, with fallback
+    # Nominal video FPS with fallback
     raw_fps = cap.get(cv2.CAP_PROP_FPS)
     if raw_fps and raw_fps > 0:
         video_fps = float(raw_fps)
@@ -99,46 +120,12 @@ def record_detections(
         min_iou=float(getattr(config, "MIN_IOU", 0.15)),
     )
 
-    # Try to use a saved homography if configured
-    ok = False
+    # Try to use a saved homography if configured, otherwise calibrate
     try:
-        use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
-        if use_saved:
-            h_path = getattr(config, "HOMOGRAPHY_PATH", None)
-            if h_path is not None:
-                try:
-                    h_file = Path(h_path)
-                    if h_file.exists():
-                        H = np.load(str(h_file))
-                        if (
-                                isinstance(H, np.ndarray)
-                                and H.shape == (3, 3)
-                                and np.isfinite(H).all()
-                        ):
-                            pipeline._H_board = H.astype(np.float32)  # type: ignore[attr-defined]
-                            pipeline._is_calibrated = True  # type: ignore[attr-defined]
-                            _log.info("Loaded saved homography from %s", h_file)
-                            ok = True
-                        else:
-                            _log.warning(
-                                "Saved homography at %s is invalid; falling back to saved_h_cache.",
-                                h_file,
-                            )
-                    else:
-                        _log.info(
-                            "Configured to use saved homography, but file not found at %s; calibrating.",
-                            h_file,
-                        )
-                except Exception as exc:
-                    _log.warning(
-                        "Failed to load saved homography: %s; calibrating instead.",
-                        exc,
-                    )
+        ok = apply_saved_homography(pipeline)
     except Exception:
-        # Configuration is optional, fall back to calibration below
-        pass
+        ok = False
 
-    # Calibrate if no valid saved homography was used
     if not ok:
         _log.info("Calibrating LivePipeline from video %s", video_path)
         ok = pipeline.calibrate_from_capture(
@@ -149,46 +136,8 @@ def record_detections(
             cap.release()
             raise RuntimeError(f"Calibration failed for video {video_path}")
 
-        # Save homography for future reuse if configured
         try:
-            use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
-            h_path = getattr(config, "HOMOGRAPHY_PATH", None)
-            H = getattr(pipeline, "_H_board", None)
-            if (
-                    use_saved
-                    and h_path is not None
-                    and isinstance(H, np.ndarray)
-                    and H.shape == (3, 3)
-            ):
-                h_file = Path(h_path)
-                try:
-                    h_file.parent.mkdir(parents=True, exist_ok=True)
-                except Exception:
-                    pass
-                try:
-                    np.save(str(h_file), H)
-                    try:
-                        H_chk = np.load(str(h_file))
-                        if isinstance(H_chk, np.ndarray) and H_chk.shape == (3, 3):
-                            _log.info("Saved homography to %s", h_file)
-                        else:
-                            _log.warning(
-                                "Homography file written at %s but contents invalid (shape=%s)",
-                                h_file,
-                                getattr(H_chk, "shape", None),
-                            )
-                    except Exception as exc:
-                        _log.warning(
-                            "Homography save verification failed for %s: %s",
-                            h_file,
-                            exc,
-                        )
-                except Exception as exc:
-                    _log.warning(
-                        "Failed to save homography to %s: %s",
-                        h_file,
-                        exc,
-                    )
+            save_homography_from_pipeline(pipeline)
         except Exception:
             # Do not fail the recording if saving failed
             pass

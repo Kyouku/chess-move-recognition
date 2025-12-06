@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Optional, Union
 
 _DEFAULT_LEVEL = logging.INFO
 
+LevelLike = Union[int, str]
+
 
 def _create_root_logger() -> logging.Logger:
+    """
+    Create or return the root logger for the application namespace "chess_live".
+    """
     logger = logging.getLogger("chess_live")
     if logger.handlers:
+        # Already initialized in this process
         return logger
 
     handler = logging.StreamHandler()
@@ -27,22 +33,39 @@ def _create_root_logger() -> logging.Logger:
 _root_logger = _create_root_logger()
 
 
-def set_log_level(level: int | str) -> None:
+def set_log_level(level: LevelLike) -> None:
     """
-    Set global log level, for example "DEBUG", "INFO", "WARNING".
+    Set global log level, for example "DEBUG", "INFO", "WARNING" or an int.
     """
     if isinstance(level, str):
         name = level.upper()
-        lvl = getattr(logging, name, logging.INFO)
+        numeric = logging.getLevelName(name)
+        if isinstance(numeric, int):
+            numeric_level = numeric
+        else:
+            _root_logger.warning(
+                "Unknown log level name %r, falling back to INFO",
+                level,
+            )
+            numeric_level = logging.INFO
     else:
-        lvl = int(level)
-    _root_logger.setLevel(lvl)
+        numeric_level = int(level)
+
+    _root_logger.setLevel(numeric_level)
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
-    Get module specific logger below the root "chess_live" logger.
+    Get a module specific logger below the root "chess_live" logger.
+
+    If name is None or empty, the root logger is returned.
     """
     if not name:
         return _root_logger
+
+    # Allow passing fully qualified names that already start with "chess_live."
+    prefix = "chess_live."
+    if name.startswith(prefix):
+        name = name[len(prefix):]
+
     return _root_logger.getChild(name)

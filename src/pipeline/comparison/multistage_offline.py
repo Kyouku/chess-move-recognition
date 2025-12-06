@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+"""
+Offline runner for the multistage MoveTracker in the comparison pipeline.
+
+Takes a DetectionState sequence, runs the tracker with optional time based
+sampling, and returns a PipelineResult for evaluation.
+"""
+
 from typing import List
 
 from src import config
@@ -44,9 +51,9 @@ def run_multistage(
 
     total_frames = len(states)
 
-    # Unified iteration using time-based gating helper
+    # Unified iteration using time based gating helper
     for idx, should_process in iter_time_based_should_process(
-            video_fps, detector_fps, total_frames
+            video_fps, detector_fps, total_frames,
     ):
         state = states[idx]
         _log.debug(

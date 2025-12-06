@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+"""
+Shared live base for multistage and baseline pipelines.
+
+Handles capture, Stage 1 rectification, Stage 2 detection and GUI.
+Stage 3 logic is delegated to subclasses via handle_detection_state.
+"""
+
 import queue
 import threading
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Optional, Union, Tuple, Dict, List
 
 import cv2
@@ -12,6 +18,10 @@ import numpy as np
 from src import config
 from src.app_gui import show_image, wait_key, destroy_all_windows, enable_gui
 from src.common.app_logging import get_logger
+from src.common.homography_cache import (
+    apply_saved_homography,
+    save_homography_from_pipeline,
+)
 from src.common.types import DetectionState
 from src.stage1.board_rectifier import LivePipeline
 from src.stage2.piece_detection import PieceDetector
@@ -111,7 +121,7 @@ class DetectionWorker(threading.Thread):
     Stage 2 worker thread.
 
     Consumes rectified boards, runs the piece detector and produces a
-    DetectionState (occupancy, labels, raw boxes, confidences) per board.
+    DetectionState per board.
     """
 
     def __init__(
@@ -176,45 +186,20 @@ def _calibrate_pipeline(
         desired_height: Optional[int] = None,
 ) -> bool:
     """
-    Calibrate stage 1 once before starting the live threads.
+    Calibrate Stage 1 once before starting the live threads.
 
     For camera sources this requests the same resolution as used at runtime.
     """
-    # First try to load a previously saved homography and skip re-calibration
+    # First try to load a previously saved homography and skip re calibration
     try:
-        use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
-        if use_saved:
-            h_path = getattr(config, "HOMOGRAPHY_PATH", None)
-            if h_path is not None:
-                try:
-                    h_file = Path(h_path)
-                    if h_file.exists():
-                        H = np.load(str(h_file))
-                        if isinstance(H, np.ndarray) and H.shape == (3, 3) and np.isfinite(H).all():
-                            pipeline._H_board = H.astype(np.float32)  # type: ignore[attr-defined]
-                            pipeline._is_calibrated = True  # type: ignore[attr-defined]
-                            _log.info("Loaded saved homography from %s", h_file)
-                            return True
-                        _log.warning(
-                            "Saved homography at %s is invalid; falling back to saved_h_cache.",
-                            h_file,
-                        )
-                    else:
-                        _log.info(
-                            "Configured to use saved homography, but file not found at %s; calibrating.",
-                            h_file,
-                        )
-                except Exception as exc:
-                    _log.warning(
-                        "Failed to load saved homography: %s; calibrating instead.",
-                        exc,
-                    )
+        if apply_saved_homography(pipeline):
+            return True
     except Exception:
         pass
 
     temp_cap = cv2.VideoCapture(source)
     if not temp_cap.isOpened():
-        _log.error("Could not open source for saved_h_cache: %s", source)
+        _log.error("Could not open source for calibration: %s", source)
         return False
 
     try:
@@ -238,38 +223,11 @@ def _calibrate_pipeline(
         return False
     _log.info("Calibration successful")
 
-    # Save homography after a successful calibration so it can be reused
     try:
-        h_path = getattr(config, "HOMOGRAPHY_PATH", None)
-        H = getattr(pipeline, "_H_board", None)
-        if h_path is not None and isinstance(H, np.ndarray) and H.shape == (3, 3):
-            h_file = Path(h_path)
-            try:
-                h_file.parent.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
-            try:
-                np.save(str(h_file), H)
-                try:
-                    H_chk = np.load(str(h_file))
-                    if isinstance(H_chk, np.ndarray) and H_chk.shape == (3, 3):
-                        _log.info("Saved homography to %s", h_file)
-                    else:
-                        _log.warning(
-                            "Homography file written at %s but contents invalid (shape=%s)",
-                            h_file,
-                            getattr(H_chk, "shape", None),
-                        )
-                except Exception as exc:
-                    _log.warning(
-                        "Homography save verification failed for %s: %s",
-                        h_file,
-                        exc,
-                    )
-            except Exception as exc:
-                _log.warning("Failed to save homography to %s: %s", h_file, exc)
+        save_homography_from_pipeline(pipeline)
     except Exception:
         pass
+
     return True
 
 
@@ -480,8 +438,6 @@ class BaseLivePipeline(ABC):
         """
         Hook called after Stage 1 and Stage 2 threads have been started,
         but before entering the main loop.
-
-        Subclasses can start their own worker threads here.
         """
         return None
 
@@ -489,10 +445,27 @@ class BaseLivePipeline(ABC):
         """
         Hook called during shutdown after Stage 1 and Stage 2 threads have
         been requested to stop and joined.
-
-        Subclasses can clean up additional resources here.
         """
         return None
+
+    # ------------------------------------------------------------------
+    # Configuration helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _configure_opencv() -> None:
+        cv2.setUseOptimized(True)
+        try:
+            if hasattr(config, "OPENCV_NUM_THREADS"):
+                threads = int(getattr(config, "OPENCV_NUM_THREADS") or 0)
+                if threads > 0:
+                    cv2.setNumThreads(threads)
+        except (AttributeError, TypeError, cv2.error):
+            pass
+
+    @staticmethod
+    def _configure_gui() -> None:
+        enable_gui(bool(getattr(config, "GUI_ENABLED", True)))
 
     # ------------------------------------------------------------------
     # Main run and stop logic
@@ -540,19 +513,6 @@ class BaseLivePipeline(ABC):
     # ------------------------------------------------------------------
     # Private helpers, orchestration building blocks
     # ------------------------------------------------------------------
-
-    def _configure_opencv(self) -> None:
-        cv2.setUseOptimized(True)
-        try:
-            if hasattr(config, "OPENCV_NUM_THREADS"):
-                threads = int(getattr(config, "OPENCV_NUM_THREADS") or 0)
-                if threads > 0:
-                    cv2.setNumThreads(threads)
-        except (AttributeError, TypeError, cv2.error):
-            pass
-
-    def _configure_gui(self) -> None:
-        enable_gui(bool(getattr(config, "GUI_ENABLED", True)))
 
     def _calibrate_stage1(self) -> bool:
         return _calibrate_pipeline(

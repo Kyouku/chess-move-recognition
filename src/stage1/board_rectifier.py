@@ -5,7 +5,14 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-from src.app_gui import is_enabled, create_window, destroy_window, set_mouse_callback, show_image, wait_key
+from src.app_gui import (
+    is_enabled,
+    create_window,
+    destroy_window,
+    set_mouse_callback,
+    show_image,
+    wait_key,
+)
 from src.common.app_logging import get_logger
 
 _log = get_logger(__name__)
@@ -39,10 +46,10 @@ def _resize_to_fixed_long_edge(
         raise ValueError("Invalid image with zero dimension.")
     if long_edge == target_long:
         return bgr, 1.0
-    s = float(target_long) / float(long_edge)
-    new_w, new_h = int(round(w * s)), int(round(h * s))
-    interp = cv2.INTER_AREA if s < 1.0 else cv2.INTER_LINEAR
-    return cv2.resize(bgr, (new_w, new_h), interpolation=interp), s
+    scale = float(target_long) / float(long_edge)
+    new_w, new_h = int(round(w * scale)), int(round(h * scale))
+    interp = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    return cv2.resize(bgr, (new_w, new_h), interpolation=interp), scale
 
 
 def _px_step_and_offset(
@@ -64,7 +71,7 @@ def _s_margin_matrix(board_size_px: int, margin_squares: float) -> np.ndarray:
     with the desired margins.
     """
     step, offset = _px_step_and_offset(board_size_px, margin_squares)
-    S = np.array(
+    s_mat = np.array(
         [
             [step, 0.0, offset],
             [0.0, step, offset],
@@ -72,7 +79,7 @@ def _s_margin_matrix(board_size_px: int, margin_squares: float) -> np.ndarray:
         ],
         dtype=np.float32,
     )
-    return S
+    return s_mat
 
 
 def _try_find_corners(
@@ -81,53 +88,61 @@ def _try_find_corners(
 ) -> Optional[np.ndarray]:
     """
     Detect inner chessboard corners.
-    """
-    # Modern SB method first
-    if hasattr(cv2, "findChessboardCornersSB"):
-        out = cv2.findChessboardCornersSB(
-            gray,
-            pattern_size,
-            cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY,
-        )
-        if isinstance(out, tuple):
-            ok, corners = out
-            if ok and corners is not None:
-                return corners.astype(np.float32)
-        elif out is not None:
-            return out.astype(np.float32)
 
-    # Fallbacks to classic API with light pre-processing variants
-    flags = (
+    Returns a float32 array of corners or None if detection fails.
+    """
+    corners: Optional[np.ndarray] = None
+
+    # Flags for classic corner detection variants
+    pattern_flags = (
             cv2.CALIB_CB_ADAPTIVE_THRESH
             | cv2.CALIB_CB_NORMALIZE_IMAGE
             | cv2.CALIB_CB_FILTER_QUADS
     )
 
-    # 1) As-is
-    ok, corners = cv2.findChessboardCorners(gray, pattern_size, flags)
-    if ok and corners is not None:
-        return corners.astype(np.float32)
+    # Modern SB method first
+    if hasattr(cv2, "findChessboardCornersSB"):
+        sb_res = cv2.findChessboardCornersSB(
+            gray,
+            pattern_size,
+            cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY,
+        )
+        if isinstance(sb_res, tuple):
+            ok, crn = sb_res
+            if ok and crn is not None:
+                corners = np.asarray(crn, dtype=np.float32)
+        elif sb_res is not None:
+            corners = np.asarray(sb_res, dtype=np.float32)
 
-    # 2) Slight blur can help reduce noise
-    try:
-        gray_blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        ok, corners = cv2.findChessboardCorners(gray_blur, pattern_size, flags)
-        if ok and corners is not None:
-            return corners.astype(np.float32)
-    except cv2.error:
-        pass
+    # Fallbacks to classic API with light preprocessing variants
+    if corners is None:
+        # 1) As is
+        ok, crn = cv2.findChessboardCorners(gray, pattern_size, pattern_flags)
+        if ok and crn is not None:
+            corners = np.asarray(crn, dtype=np.float32)
 
-    # 3) Local contrast (CLAHE) often helps in uneven lighting
-    try:
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        gray_eq = clahe.apply(gray)
-        ok, corners = cv2.findChessboardCorners(gray_eq, pattern_size, flags)
-        if ok and corners is not None:
-            return corners.astype(np.float32)
-    except cv2.error:
-        pass
+    if corners is None:
+        # 2) Slight blur can help reduce noise
+        try:
+            gray_blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            ok, crn = cv2.findChessboardCorners(gray_blur, pattern_size, pattern_flags)
+            if ok and crn is not None:
+                corners = np.asarray(crn, dtype=np.float32)
+        except cv2.error:
+            pass
 
-    return None
+    if corners is None:
+        # 3) Local contrast (CLAHE) often helps in uneven lighting
+        try:
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            gray_eq = clahe.apply(gray)
+            ok, crn = cv2.findChessboardCorners(gray_eq, pattern_size, pattern_flags)
+            if ok and crn is not None:
+                corners = np.asarray(crn, dtype=np.float32)
+        except cv2.error:
+            pass
+
+    return corners
 
 
 def _auto_homography_from_frame_pre(
@@ -152,21 +167,16 @@ def _auto_homography_from_frame_pre(
     # Reject boards that are too small in the frame
     img_h, img_w = gray.shape[:2]
     img_area = float(img_h * img_w)
-    x, y, w_box, h_box = cv2.boundingRect(corners)
+    x_box, y_box, w_box, h_box = cv2.boundingRect(corners)
     board_area = float(w_box * h_box)
     area_ratio = board_area / img_area
 
     if area_ratio < float(min_board_area_ratio):
-        try:
-            from src.common.app_logging import get_logger  # local import to avoid cycles
-            _log_local = get_logger(__name__)
-            _log_local.debug(
-                "[Stage1] Rejecting candidate: board_area_ratio=%.4f < min=%.4f",
-                area_ratio,
-                float(min_board_area_ratio),
-            )
-        except (ImportError, AttributeError):
-            pass
+        _log.debug(
+            "[Stage1] Rejecting candidate: board_area_ratio=%.4f < min=%.4f",
+            area_ratio,
+            float(min_board_area_ratio),
+        )
         return None
 
     try:
@@ -186,7 +196,7 @@ def _auto_homography_from_frame_pre(
     # Object points in board coordinate system (unit = one square)
     # Inner corners from (1, 1) to (7, 7)
     objp = np.array(
-        [[x + 1, y + 1] for y in range(ny) for x in range(nx)],
+        [[ix + 1, iy + 1] for iy in range(ny) for ix in range(nx)],
         dtype=np.float32,
     )
 
@@ -194,8 +204,8 @@ def _auto_homography_from_frame_pre(
     if h_board is None or not np.isfinite(h_board).all():
         return None
 
-    S_m = _s_margin_matrix(board_size_px, margin_squares)
-    h_total = (S_m @ h_board).astype(np.float32)
+    margin_mat = _s_margin_matrix(board_size_px, margin_squares)
+    h_total = (margin_mat @ h_board).astype(np.float32)
     return h_total
 
 
@@ -223,8 +233,8 @@ class LivePipeline:
       - fallback to manual corner selection if auto fails
       - board rectification each frame
 
-    No direct access to a global config module.
-    All parameters are passed through the constructor.
+    All parameters are passed through the constructor, there is no
+    direct access to a global config module.
     """
 
     def __init__(
@@ -251,7 +261,7 @@ class LivePipeline:
         # Target long edge for preprocessing
         default_long = max(self.frame_width, self.frame_height)
         self._target_long_edge = int(
-            input_target_long_edge if input_target_long_edge is not None else default_long
+            input_target_long_edge if input_target_long_edge is not None else default_long,
         )
 
         self._min_board_area_ratio = float(min_board_area_ratio)
@@ -296,19 +306,20 @@ class LivePipeline:
             max_frames: int = 300,
     ) -> bool:
         """
-        Perform calibration from a short sequence. If automatic calibration
-        succeeds, no manual window is shown. Only if automatic calibration
-        fails, a manual calibration window is displayed to let the user
-        select the four board corners.
+        Perform calibration from a short sequence.
+
+        If automatic calibration succeeds, no manual window is shown.
+        Only if automatic calibration fails, a manual calibration
+        window is displayed to let the user select the four board corners.
         """
         win_name = "Calibration"
 
         auto_limit = max_frames
         last_pre_frame: Optional[np.ndarray] = None
 
-        _log.info("Starting automatic saved_h_cache (silent).")
+        _log.info("Starting automatic calibration (silent).")
         _log.debug(
-            "[Stage1] Auto-saved_h_cache params: target_long_edge=%d, board_size_px=%d, min_board_area_ratio=%.3f",
+            "[Stage1] Auto calibration params: target_long_edge=%d, board_size_px=%d, min_board_area_ratio=%.3f",
             self._target_long_edge,
             self.board_size_px,
             self._min_board_area_ratio,
@@ -336,7 +347,6 @@ class LivePipeline:
             )
 
             # No GUI during automatic calibration; run silently
-
             if h_total is None:
                 continue
 
@@ -357,16 +367,16 @@ class LivePipeline:
         # Manual fallback only when GUI is active
         if not is_enabled():
             _log.warning(
-                "Auto saved_h_cache did not find a board and GUI is disabled, "
-                "manual saved_h_cache is not possible."
+                "Auto calibration did not find a board and GUI is disabled, "
+                "manual calibration is not possible.",
             )
             return False
 
         _log.info(
-            "Auto saved_h_cache did not find a board, switching to manual corner selection."
+            "Auto calibration did not find a board, switching to manual corner selection.",
         )
         if last_pre_frame is None:
-            _log.warning("No frame available for manual saved_h_cache.")
+            _log.warning("No frame available for manual calibration.")
             return False
 
         # Create the window only for manual calibration
@@ -382,9 +392,9 @@ class LivePipeline:
 
         self._is_calibrated = manual_ok
         if manual_ok:
-            _log.info("Manual saved_h_cache successful.")
+            _log.info("Manual calibration successful.")
         else:
-            _log.warning("Manual saved_h_cache failed.")
+            _log.warning("Manual calibration failed.")
 
         return manual_ok
 
@@ -396,22 +406,23 @@ class LivePipeline:
     ) -> bool:
         """
         Manual calibration.
-        User clicks 4 corners of the board on the pre-resized frame:
-        1 top left
-        2 top right
-        3 bottom right
-        4 bottom left
+
+        User clicks 4 corners of the board on the pre resized frame:
+          1 top left
+          2 top right
+          3 bottom right
+          4 bottom left
         """
         if not is_enabled():
-            _log.warning("Manual saved_h_cache requested but GUI is disabled.")
+            _log.warning("Manual calibration requested but GUI is disabled.")
             return False
 
         points: list[tuple[int, int]] = []
 
-        def on_mouse(event, x, y, flags, param) -> None:
+        def on_mouse(event, x_pos, y_pos, _mouse_flags, _param) -> None:
             nonlocal points
             if event == cv2.EVENT_LBUTTONDOWN and len(points) < 4:
-                points.append((x, y))
+                points.append((x_pos, y_pos))
 
         set_mouse_callback(win_name, on_mouse)
 
@@ -428,12 +439,12 @@ class LivePipeline:
                 cv2.LINE_AA,
             )
 
-            for idx, (x, y) in enumerate(points):
-                cv2.circle(display, (x, y), 6, (0, 255, 0), -1)
+            for idx, (px, py) in enumerate(points):
+                cv2.circle(display, (px, py), 6, (0, 255, 0), -1)
                 cv2.putText(
                     display,
                     str(idx + 1),
-                    (x + 5, y - 5),
+                    (px + 5, py - 5),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
                     (0, 255, 0),
@@ -444,13 +455,13 @@ class LivePipeline:
             show_image(win_name, display)
             key = wait_key(20)
             if key == 27:
-                _log.info("Manual saved_h_cache cancelled.")
+                _log.info("Manual calibration cancelled.")
                 return False
             if key in (13, 32) and len(points) == 4:
                 break
 
         if len(points) != 4:
-            _log.warning("Need exactly 4 points for saved_h_cache.")
+            _log.warning("Need exactly 4 points for calibration.")
             return False
 
         src = np.array(points, dtype=np.float32)
@@ -484,6 +495,7 @@ class LivePipeline:
     def process_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
         """
         Main call from live loop.
+
         Rectifies the board on every frame and stores it for detectors.
         Returns only the warped board view for display if calibrated,
         otherwise the raw frame.

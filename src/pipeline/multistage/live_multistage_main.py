@@ -17,10 +17,17 @@ from src.stage3.move_tracking import MoveTracker, MoveTrackerWorker
 
 _log = get_logger(__name__)
 
+
 class MultiStagePipeline(BaseLivePipeline):
     """
-    Full multi stage pipeline with temporal filtering and MoveTracker.
-    Stage 1 + 2 live handling comes from BaseLivePipeline.
+    Full multi stage live pipeline.
+
+    Responsibilities:
+      - Stage 1 and 2 orchestration are handled by BaseLivePipeline
+        (capture, rectification, piece detection, GUI).
+      - Stage 3 is handled here via MoveTracker and a dedicated
+        MoveTrackerWorker thread that consumes occupancy and labels
+        and emits MoveInfo objects.
     """
 
     def __init__(
@@ -29,29 +36,35 @@ class MultiStagePipeline(BaseLivePipeline):
             *,
             width: Optional[int] = None,
             height: Optional[int] = None,
-            board_size_px: int = config.BOARD_SIZE_PX,
+            board_size_px: Optional[int] = None,
     ) -> None:
+        if board_size_px is None:
+            board_size_px = int(getattr(config, "BOARD_SIZE_PX", 640))
+
         super().__init__(
             source=source,
             width=width,
             height=height,
             board_size_px=board_size_px,
-            window_name=config.DISPLAY_WINDOW_NAME,
+            window_name=getattr(config, "DISPLAY_WINDOW_NAME", "Live"),
         )
 
         # Stage 3: MoveTracker with temporal filter and its own worker
         self.move_tracker = MoveTracker(
-            alpha=float(config.MOVE_FILTER_ALPHA),
-            occ_threshold=float(config.MOVE_FILTER_THRESHOLD),
-            min_confirm_frames=int(config.MOVE_MIN_CONFIRM_FRAMES),
-            debug=bool(config.MOVE_DEBUG),
+            alpha=float(getattr(config, "MOVE_FILTER_ALPHA", 0.6)),
+            occ_threshold=float(getattr(config, "MOVE_FILTER_THRESHOLD", 0.6)),
+            min_confirm_frames=int(
+                getattr(config, "MOVE_MIN_CONFIRM_FRAMES", 2),
+            ),
+            debug=bool(getattr(config, "MOVE_DEBUG", False)),
         )
 
-        self.move_in_queue: "queue.Queue[Tuple[Dict[str, bool], Dict[str, Optional[str]]]]" = queue.Queue(
-            maxsize=config.MOVE_IN_QUEUE_SIZE
+        # Queues between Stage 2 and Stage 3
+        self.move_in_queue: "queue.Queue[Tuple[Dict[str, bool], Dict[str, Optional[str]]]]" = (
+            queue.Queue(maxsize=int(getattr(config, "MOVE_IN_QUEUE_SIZE", 8)))
         )
         self.move_out_queue: "queue.Queue[MoveInfo]" = queue.Queue(
-            maxsize=config.MOVE_OUT_QUEUE_SIZE
+            maxsize=int(getattr(config, "MOVE_OUT_QUEUE_SIZE", 16)),
         )
 
         self.move_worker = MoveTrackerWorker(
@@ -62,7 +75,7 @@ class MultiStagePipeline(BaseLivePipeline):
             name="MoveTrackerWorker-1",
         )
 
-        # Collected SAN detected_moves for summary / PGN export
+        # Collected SAN moves for summary or PGN export
         self.moves: List[str] = []
 
     # ------------------------------------------------------------------
@@ -70,67 +83,53 @@ class MultiStagePipeline(BaseLivePipeline):
     # ------------------------------------------------------------------
 
     def on_start(self) -> None:
-        # Start Stage 3 worker after Stage 1 + 2 are running
+        """
+        Called after Stage 1 and 2 threads have been started.
+
+        Starts the Stage 3 MoveTracker worker.
+        """
         self.move_worker.start()
 
     def handle_detection_state(self, state: DetectionState) -> None:
-        # Only occupancy and labels are needed by MoveTracker
+        """
+        Called once for every DetectionState drained from the Stage 2 queue.
+
+        Only occupancy and labels are needed by MoveTracker, so we enqueue
+        a compact tuple for the MoveTrackerWorker.
+        """
+        payload: Tuple[Dict[str, bool], Dict[str, Optional[str]]] = (
+            state.occupancy,
+            state.pieces,
+        )
         try:
-            self.move_in_queue.put_nowait((state.occupancy, state.pieces))
+            self.move_in_queue.put_nowait(payload)
         except queue.Full:
-            # Drop if worker is busy
-            pass
+            # Worker is busy, drop current state rather than blocking
+            _log.debug("Move input queue full, dropping detection state")
 
     def after_detection_batch(self) -> None:
-        # Drain finished detected_moves from the move worker
+        """
+        Called once per frame after all DetectionStates for that frame
+        have been processed.
+
+        Here we drain all MoveInfo objects currently available from
+        the move worker output queue.
+        """
         while True:
             try:
                 info: MoveInfo = self.move_out_queue.get_nowait()
             except queue.Empty:
                 break
 
-            msg_lines = [
-                "==================================================",
-                f"[MAIN] Move detected: {info.san} ({info.move.uci()})",
-                f"[MAIN] FEN after: {info.fen_after}",
-                "[MAIN] Board:",
-                str(self.move_tracker.board),
-                "==================================================",
-            ]
-            _log.info("\n".join(msg_lines))
-
-            self.moves.append(info.san)
-
-            # Optional file logging (non-fatal on errors)
-            append_move_log(info)
-
-            # Reset ONLY on checkmate; ignore draws
-            if getattr(info, "is_checkmate", False):
-                _log.info(
-                    "[MAIN] Checkmate detected. Saving game and resetting to initial position...",
-                )
-                # Save current game detected_moves to PGN/text
-                try:
-                    write_moves_txt(self.moves)
-                except (OSError, ValueError) as e:
-                    _log.warning("Failed to write game detected_moves on game over: %s", e)
-
-                # Clear current move list
-                self.moves.clear()
-
-                # Reset the move tracker to wait for initial position again
-                # Reset MoveTracker to initial position
-                self.move_tracker.reset_to_start()
-
-                # Drain any pending outputs from the previous game to avoid duplicates
-                try:
-                    while True:
-                        self.move_out_queue.get_nowait()
-                except queue.Empty:
-                    pass
+            self._on_move_detected(info)
 
     def on_stop(self) -> None:
-        # Join move worker and write remaining detected_moves, if any
+        """
+        Called during shutdown after Stage 1 and 2 have been stopped.
+
+        Joins the MoveTracker worker and writes remaining moves to disk
+        if there are any pending.
+        """
         try:
             self.move_worker.join(timeout=1.0)
         except RuntimeError:
@@ -139,16 +138,82 @@ class MultiStagePipeline(BaseLivePipeline):
         if self.moves:
             try:
                 write_moves_txt(self.moves)
-            except (OSError, ValueError) as e:
-                _log.warning("Failed to write game detected_moves on shutdown: %s", e)
+            except (OSError, ValueError) as exc:
+                _log.warning(
+                    "Failed to write game moves on shutdown: %s",
+                    exc,
+                )
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _on_move_detected(self, info: MoveInfo) -> None:
+        """
+        Handle a single confirmed MoveInfo emitted by the MoveTracker.
+        """
+        msg_lines = [
+            "==================================================",
+            f"[MAIN] Move detected: {info.san} ({info.move.uci()})",
+            f"[MAIN] FEN after: {info.fen_after}",
+            "[MAIN] Board:",
+            str(self.move_tracker.board),
+            "==================================================",
+        ]
+        _log.info("\n".join(msg_lines))
+
+        self.moves.append(info.san)
+
+        # Optional file logging (non fatal on errors)
+        append_move_log(info)
+
+        # Reset only on checkmate, draws are ignored intentionally
+        if getattr(info, "is_checkmate", False):
+            _log.info(
+                "[MAIN] Checkmate detected. Saving game and resetting to initial position...",
+            )
+            # Save current game moves to PGN or text
+            try:
+                write_moves_txt(self.moves)
+            except (OSError, ValueError) as exc:
+                _log.warning(
+                    "Failed to write game moves on game over: %s",
+                    exc,
+                )
+
+            # Clear current move list
+            self.moves.clear()
+
+            # Reset MoveTracker to the initial position and wait for a new game
+            self.move_tracker.reset_to_start()
+
+            # Drain any pending outputs from the previous game to avoid duplicates
+            try:
+                while True:
+                    self.move_out_queue.get_nowait()
+            except queue.Empty:
+                pass
+
+
+# ----------------------------------------------------------------------
+# Entry points
+# ----------------------------------------------------------------------
 
 
 def run_live(
         source: CaptureSource,
-        width: int = config.FRAME_WIDTH,
-        height: int = config.FRAME_HEIGHT,
-        board_size_px: int = config.BOARD_SIZE_PX,
+        width: int = None,
+        height: int = None,
+        board_size_px: Optional[int] = None,
 ) -> None:
+    """
+    Convenience function to start the live multi stage pipeline.
+    """
+    if width is None:
+        width = int(getattr(config, "FRAME_WIDTH", 1280))
+    if height is None:
+        height = int(getattr(config, "FRAME_HEIGHT", 720))
+
     pipeline = MultiStagePipeline(
         source=source,
         width=width,
@@ -159,6 +224,12 @@ def run_live(
 
 
 def main() -> None:
+    """
+    Minimal CLI entry point for manual testing.
+
+    Currently just sets a fixed log level and runs with the
+    configured capture source.
+    """
     set_log_level(logging.DEBUG)
     src = get_capture_source()
     run_live(src)

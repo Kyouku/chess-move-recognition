@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+"""
+Interactive tool to annotate ply to frame mappings for tournament videos.
+
+Given a video and a PGN for a single game, this script lets a human annotator
+step through the video and assign frame indices to plies. The result is
+stored as a JSON ground truth file.
+"""
+
 import argparse
 import io
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 import chess
 import chess.pgn
@@ -15,13 +24,24 @@ from src.common.app_logging import get_logger
 _log = get_logger(__name__)
 
 """
-python -m src.comparison_results.prepare_ground_truth --video data/videos/game1.mp4 --pgn data/gt/testgame.pgn --out data/gt/testgame.json
+Example usage:
+
+python -m src.pipeline.comparison.prepare_ground_truth \
+  --video data/videos/game1.mp4 \
+  --pgn data/gt/game1.pgn \
+  --out data/gt/game1.json
 """
 
 
-def _load_pgn_moves(pgn_path: Path) -> Tuple[str, List[str]]:
+@dataclass
+class _PgnData:
+    text: str
+    san_moves: List[str]
+
+
+def _load_pgn_moves(pgn_path: Path) -> _PgnData:
     """
-    Load PGN text and return it together with the main line detected_moves in SAN.
+    Load PGN text and return it together with the main line moves in SAN.
     """
     text = pgn_path.read_text(encoding="utf8")
     game_io = io.StringIO(text)
@@ -36,11 +56,11 @@ def _load_pgn_moves(pgn_path: Path) -> Tuple[str, List[str]]:
         san_moves.append(san)
         board.push(move)
 
-    return text, san_moves
+    return _PgnData(text=text, san_moves=san_moves)
 
 
 def _draw_overlay(
-        frame,
+        frame: Any,
         frame_idx: int,
         num_frames: int,
         ply_idx: int,
@@ -50,7 +70,6 @@ def _draw_overlay(
     """
     Draw a readable text overlay with current frame, move and instructions.
     """
-
     h, w = frame.shape[:2]
 
     # Scale text for readability based on frame height
@@ -88,7 +107,7 @@ def _draw_overlay(
     panel_x1 = panel_x0 + left_pad + text_w + right_pad
     panel_y1 = panel_y0 + top_pad + total_text_h + bottom_pad
 
-    # Draw semi-transparent background panel for readability
+    # Draw semi transparent background panel for readability
     overlay = frame.copy()
     cv2.rectangle(
         overlay,
@@ -103,14 +122,32 @@ def _draw_overlay(
     # Render text lines on top of the panel
     x = panel_x0 + left_pad
     y = panel_y0 + top_pad
-    for i, (text, ts) in enumerate(zip(lines, text_sizes)):
+    for text, ts in zip(lines, text_sizes):
         # Draw shadow for contrast
-        cv2.putText(frame, text, (x + 2, y + ts[1] + 2), font, font_scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
-        cv2.putText(frame, text, (x, y + ts[1]), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        cv2.putText(
+            frame,
+            text,
+            (x + 2, y + ts[1] + 2),
+            font,
+            font_scale,
+            (0, 0, 0),
+            thickness + 1,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            frame,
+            text,
+            (x, y + ts[1]),
+            font,
+            font_scale,
+            (255, 255, 255),
+            thickness,
+            cv2.LINE_AA,
+        )
         y += ts[1] + line_gap
 
 
-def _get_frame(cap: cv2.VideoCapture, idx: int) -> Tuple[bool, any]:
+def _get_frame(cap: cv2.VideoCapture, idx: int) -> Tuple[bool, Any]:
     """
     Seek to frame idx and return (ok, frame).
     """
@@ -140,10 +177,12 @@ def annotate_game(
         }
       }
     """
-    pgn_text, san_moves = _load_pgn_moves(pgn_path)
+    pgn_data = _load_pgn_moves(pgn_path)
+    san_moves = pgn_data.san_moves
+    pgn_text = pgn_data.text
     total_plies = len(san_moves)
     _log.info(
-        "Loaded PGN from %s with %d plies", pgn_path, total_plies
+        "Loaded PGN from %s with %d plies", pgn_path, total_plies,
     )
 
     cap = cv2.VideoCapture(str(video_path))
@@ -162,7 +201,11 @@ def annotate_game(
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     # Try to open in full screen for better visibility. Fall back silently.
     try:
-        cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        cv2.setWindowProperty(
+            window_name,
+            cv2.WND_PROP_FULLSCREEN,
+            cv2.WINDOW_FULLSCREEN,
+        )
     except cv2.error:
         pass
 
@@ -188,7 +231,7 @@ def annotate_game(
             _log.info("User requested quit")
             break
 
-        # One frame forward / back
+        # One frame forward or back
         elif key == ord("j"):  # next frame
             frame_idx = min(frame_idx + 1, max(num_frames - 1, 0))
         elif key == ord("k"):  # previous frame
@@ -215,7 +258,7 @@ def annotate_game(
         # Mark current frame as stable board after current ply
         elif key == ord("m"):
             if ply_idx >= total_plies:
-                _log.info("All plies already processed_images, nothing to mark")
+                _log.info("All plies already processed, nothing to mark")
             else:
                 ply_num = ply_idx + 1
                 frame_for_ply[ply_num] = frame_idx
@@ -277,26 +320,28 @@ def annotate_game(
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Interactive tool to annotate ply-to-frame mapping "
-                    "for tournament videos.",
+        description=(
+            "Interactive tool to annotate ply to frame mapping "
+            "for tournament videos."
+        ),
     )
     p.add_argument(
         "--video",
         type=Path,
         required=True,
-        help="Path to the tournament video file",
+        help="Path to the tournament video file.",
     )
     p.add_argument(
         "--pgn",
         type=Path,
         required=True,
-        help="Path to a PGN file for this game",
+        help="Path to a PGN file for this game.",
     )
     p.add_argument(
         "--out",
         type=Path,
         required=True,
-        help="Output JSON file for ground truth",
+        help="Output JSON file for ground truth.",
     )
     return p.parse_args()
 

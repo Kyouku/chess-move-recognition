@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+"""
+Ground truth handling and evaluation metrics for the offline comparison pipeline.
+"""
+
 import io
 import json
 from dataclasses import dataclass
@@ -14,6 +18,19 @@ from src.pipeline.fen_utils import placement_from_fen
 
 @dataclass
 class GroundTruth:
+    """
+    Ground truth representation for a single game.
+
+    - pgn:
+        Original PGN text.
+    - moves_uci:
+        Mainline moves in UCI notation.
+    - fens_after_ply:
+        FEN strings for the position after each ply.
+    - frame_for_ply:
+        Optional mapping from ply index (1 based) to frame index.
+    """
+
     pgn: str
     moves_uci: List[str]
     fens_after_ply: List[str]
@@ -221,7 +238,10 @@ def fen_interval_accuracy(
 # -------------------------------------------------------------
 
 
-def move_accuracy_counts(pred_moves: List[str], gt_moves: List[str]) -> Tuple[int, int]:
+def move_accuracy_counts(
+        pred_moves: List[str],
+        gt_moves: List[str],
+) -> Tuple[int, int]:
     """
     Exact move accuracy at the sequence level.
 
@@ -257,7 +277,7 @@ def move_reconstruction_rate(
     """
     Move Reconstruction Rate (MRR) as used in the thesis:
 
-      fraction of detected_moves in a game that are reconstructed correctly,
+      fraction of moves in a game that are reconstructed correctly,
       counted over the entire sequence.
 
     This is identical to sequence level move accuracy.

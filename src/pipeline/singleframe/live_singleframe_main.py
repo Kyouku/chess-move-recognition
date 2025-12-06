@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Live single frame baseline pipeline.
+
+Reuses Stage 1 and 2 from BaseLivePipeline and exports stable FEN snapshots
+once the initial position has been detected reliably. No move inference or
+game state tracking is performed.
+"""
+
 from typing import Dict, Optional
 
 import chess
@@ -20,6 +28,7 @@ from src.pipeline.live_base import (
 
 _log = get_logger(__name__)
 
+
 # ---------------------------------------------------------------------------
 # Single frame live baseline: FEN only
 # ---------------------------------------------------------------------------
@@ -27,7 +36,7 @@ _log = get_logger(__name__)
 
 class SingleFramePipeline(BaseLivePipeline):
     """
-    Live app that reuses stage 1 and 2 from BaseLivePipeline and outputs
+    Live app that reuses Stage 1 and 2 from BaseLivePipeline and outputs
     FEN snapshots for stable board frames.
 
     No move inference or game state tracking is performed here.
@@ -48,7 +57,7 @@ class SingleFramePipeline(BaseLivePipeline):
             window_name=str(getattr(config, "DISPLAY_WINDOW_NAME", "Board")),
         )
 
-        # Used to wait until the normal start position is stable
+        # Used to wait until the standard start position is stable
         self._start_occ: Dict[str, bool] = self._board_to_occupancy(chess.Board())
         self._start_seen_frames: int = 0
         self._initialized: bool = False
@@ -76,10 +85,13 @@ class SingleFramePipeline(BaseLivePipeline):
 
     @staticmethod
     def _board_to_occupancy(board: chess.Board) -> Dict[str, bool]:
-        occ: Dict[str, bool] = {}
+        """
+        Convert a python chess Board into an occupancy mask over algebraic squares.
+        """
+        occupancy: Dict[str, bool] = {}
         for sq in chess.SQUARES:
-            occ[chess.square_name(sq)] = board.piece_at(sq) is not None
-        return occ
+            occupancy[chess.square_name(sq)] = board.piece_at(sq) is not None
+        return occupancy
 
     def _update_start_initialization(self, state: DetectionState) -> None:
         """
@@ -89,7 +101,10 @@ class SingleFramePipeline(BaseLivePipeline):
             return
 
         curr_occ = state.occupancy
-        same = all(bool(curr_occ.get(sq, False)) == want for sq, want in self._start_occ.items())
+        same = all(
+            bool(curr_occ.get(sq, False)) == want
+            for sq, want in self._start_occ.items()
+        )
         if same:
             self._start_seen_frames += 1
             if self._start_seen_frames >= self._min_start_frames:
@@ -135,14 +150,39 @@ class SingleFramePipeline(BaseLivePipeline):
 
         _log.info("Baseline stable FEN: %s", fen)
 
-        # Optional: write FEN snapshots using centralized helper (non-fatal)
+        # Optional: write FEN snapshots using centralized helper (non fatal)
         append_fen_log(fen)
+
+
+# ---------------------------------------------------------------------------
+# Entry points
+# ---------------------------------------------------------------------------
+
+
+def run_live(
+        source: CaptureSource,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+) -> None:
+    """
+    Convenience function to start the live single frame baseline.
+    """
+    if width is None:
+        width = int(getattr(config, "FRAME_WIDTH", 1280))
+    if height is None:
+        height = int(getattr(config, "FRAME_HEIGHT", 720))
+
+    pipeline = SingleFramePipeline(
+        source=source,
+        width=width,
+        height=height,
+    )
+    pipeline.run()
 
 
 def main() -> None:
     source = get_capture_source()
-    pipeline = SingleFramePipeline(source=source)
-    pipeline.run()
+    run_live(source)
 
 
 if __name__ == "__main__":

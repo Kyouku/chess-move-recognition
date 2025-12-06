@@ -67,9 +67,9 @@ class BoardStateFilter:
         }
 
         for det in detections:
-            s = det.square
-            if s in evidence:
-                evidence[s] = 1.0
+            square_name = det.square
+            if square_name in evidence:
+                evidence[square_name] = 1.0
 
         return self._update(evidence)
 
@@ -122,7 +122,7 @@ def _sorted_squares() -> List[str]:
 class MoveTracker:
     """
     Keeps track of the chess game state using python chess and
-    derives detected_moves from temporally filtered occupancy maps.
+    derives moves from temporally filtered occupancy maps.
 
     The dictionaries passed in (occupancy, pieces) use the same
     algebraic square names as python chess, for example "e4".
@@ -145,9 +145,6 @@ class MoveTracker:
 
         self._pending_candidates: Optional[List[chess.Move]] = None
         self._pending_frames: int = 0
-        # Allow brief gaps where candidates temporarily disappear without
-        # immediately clearing pending state. This helps recall when the
-        # detector or filter flickers for a frame.
         self._pending_grace_misses: int = 0
         self._max_grace_misses: int = 1
 
@@ -165,7 +162,7 @@ class MoveTracker:
     def is_initialized(self) -> bool:
         """
         True once the tracker has locked on the initial position
-        and started tracking detected_moves.
+        and started tracking moves.
         """
         return self._initialized
 
@@ -187,10 +184,10 @@ class MoveTracker:
 
         _log.debug("[MoveTracker] %s - frame %d", tag, frame_idx)
         for name in _sorted_squares():
-            o = occ.get(name, False)
+            occupied = occ.get(name, False)
             lbl = pieces.get(name)
             lbl_str = "." if lbl is None else str(lbl)
-            _log.debug("  %s: occ=%d label=%s", name, int(bool(o)), lbl_str)
+            _log.debug("  %s: occ=%d label=%s", name, int(bool(occupied)), lbl_str)
         _log.debug("[MoveTracker] end of state dump")
 
     @staticmethod
@@ -297,7 +294,7 @@ class MoveTracker:
             target_occ: Dict[str, bool],
     ) -> List[chess.Move]:
         """
-        Search among all legal detected_moves for those that produce the observed
+        Search among all legal moves for those that produce the observed
         occupancy pattern only.
         """
         candidates: List[chess.Move] = []
@@ -311,7 +308,7 @@ class MoveTracker:
 
         if self._debug:
             _log.debug(
-                "[MoveTracker] occupancy only candidate search: found %d detected_moves",
+                "[MoveTracker] occupancy only candidate search: found %d moves",
                 len(candidates),
             )
 
@@ -323,7 +320,7 @@ class MoveTracker:
             target_pieces: Dict[str, Optional[str]],
     ) -> List[chess.Move]:
         """
-        Search among all legal detected_moves for those that produce the observed
+        Search among all legal moves for those that produce the observed
         board state (occupancy plus piece labels).
         """
         candidates: List[chess.Move] = []
@@ -339,7 +336,7 @@ class MoveTracker:
 
         if self._debug:
             _log.debug(
-                "[MoveTracker] full state candidate search: found %d detected_moves",
+                "[MoveTracker] full state candidate search: found %d moves",
                 len(candidates),
             )
 
@@ -353,13 +350,16 @@ class MoveTracker:
         Confirmation logic with hysteresis over multiple frames.
         """
         if not candidates:
-            # One-frame grace period: keep pending set if it existed, to avoid
-            # losing progress on transient drops.
-            if self._pending_candidates is not None and self._pending_grace_misses < self._max_grace_misses:
+            # One frame grace period: keep pending set if it existed
+            if (
+                    self._pending_candidates is not None
+                    and self._pending_grace_misses < self._max_grace_misses
+            ):
                 self._pending_grace_misses += 1
                 if self._debug:
                     _log.debug(
-                        "[MoveTracker] candidates empty, using grace miss %d/%d (keeping pending)",
+                        "[MoveTracker] candidates empty, using grace miss %d/%d "
+                        "(keeping pending)",
                         self._pending_grace_misses,
                         self._max_grace_misses,
                     )
@@ -372,7 +372,7 @@ class MoveTracker:
             self._pending_grace_misses = 0
             return None
 
-        # We have candidates this frame – reset grace misses counter
+        # We have candidates this frame
         self._pending_grace_misses = 0
 
         new_set = frozenset(m.uci() for m in candidates)
@@ -417,7 +417,7 @@ class MoveTracker:
         Handle auto initialization based on the filtered occupancy.
 
         Returns True if we are still in the waiting phase or just finished
-        initialization and should not search for detected_moves in this frame.
+        initialization and should not search for moves in this frame.
         """
         if self._initialized or not self._waiting_for_start:
             return False
@@ -467,13 +467,7 @@ class MoveTracker:
             pieces: Optional[Dict[str, Optional[str]]] = None,
     ) -> MoveInfo:
         """
-        Common tail logic after a move has been selected/confirmed.
-
-        - Compute SAN
-        - Push move to board and compute FEN
-        - Debug logging and board dump
-        - Update last debug state caches
-        - Return MoveInfo
+        Common tail logic after a move has been selected or confirmed.
         """
         san = self.board.san(move)
         self.board.push(move)
@@ -488,10 +482,8 @@ class MoveTracker:
             self._debug_print_board("after move")
 
         self._last_occ_for_debug = dict(curr_occ)
-        self._last_pieces_for_debug = (
-            dict(pieces) if pieces is not None else None
-        )
-        # Check game status after the move
+        self._last_pieces_for_debug = dict(pieces) if pieces is not None else None
+
         is_mate = self.board.is_checkmate()
         is_over = self.board.is_game_over(claim_draw=True)
         result = self.board.result(claim_draw=True) if is_over else None
@@ -508,17 +500,14 @@ class MoveTracker:
     def reset_to_start(self) -> None:
         """
         Reset tracker state so the pipeline waits for the initial position
-        again. This clears temporal filters, pending candidates and returns the
-        internal board to the initial setup.
+        again.
         """
         if self._debug:
             _log.debug("[MoveTracker] reset_to_start() called")
 
-        # Reset chess position and temporal filter
         self.board = chess.Board()
         self.filter.reset()
 
-        # Clear tracking state
         self._pending_candidates = None
         self._pending_frames = 0
         self._pending_grace_misses = 0
@@ -526,7 +515,6 @@ class MoveTracker:
         self._last_occ_for_debug = None
         self._last_pieces_for_debug = None
 
-        # Return to waiting for start position
         self._waiting_for_start = True
         self._initialized = False
         self._start_seen_frames = 0
@@ -545,9 +533,6 @@ class MoveTracker:
         prev_occ, curr_occ = self.filter.update_from_detections(detections)
 
         if self._handle_start_detection(curr_occ):
-            # While waiting for initial position (or just after locking it),
-            # cache the latest observed occupancy so that downstream logic
-            # has a valid previous frame once tracking starts.
             self._last_occ_for_debug = dict(curr_occ)
             self._last_pieces_for_debug = None
             return None
@@ -596,7 +581,6 @@ class MoveTracker:
         prev_occ, curr_occ = self.filter.update_from_occupancy(occupancy)
 
         if self._handle_start_detection(curr_occ):
-            # Cache current occupancy while waiting; no labels available here.
             self._last_occ_for_debug = dict(curr_occ)
             self._last_pieces_for_debug = None
             return None
@@ -645,18 +629,14 @@ class MoveTracker:
         You pass in:
           occupancy: square -> bool
           pieces:    square -> YOLO label string or None
-
-        Implementation detail:
-          First search based on occupancy only.
-          If there are multiple candidate detected_moves, try to use labels
-          as a soft filter. If labels do not help, fall back to
-          pure occupancy candidates.
         """
         self._frame_index += 1
         prev_occ, curr_occ = self.filter.update_from_occupancy(occupancy)
 
         if self._debug:
-            changed = [sq for sq in curr_occ if curr_occ[sq] != prev_occ.get(sq, False)]
+            changed = [
+                sq for sq in curr_occ if curr_occ[sq] != prev_occ.get(sq, False)
+            ]
             if changed:
                 _log.debug(
                     "[MoveTracker] filtered occupancy changed at %d squares: %s",
@@ -667,8 +647,6 @@ class MoveTracker:
                 _log.debug("[MoveTracker] filtered occupancy unchanged")
 
         if self._handle_start_detection(curr_occ):
-            # While waiting for start, cache current filtered state so that
-            # label-change disambiguation has a valid previous frame post-init.
             self._last_occ_for_debug = dict(curr_occ)
             self._last_pieces_for_debug = dict(pieces)
             return None
@@ -686,13 +664,6 @@ class MoveTracker:
         candidates = self._candidate_moves_for_target_occupancy(curr_occ)
 
         if len(candidates) > 1:
-            # First, try to leverage label-change information like the
-            # single-frame baseline does: when a capture happens, the
-            # destination square typically stays occupied but its label
-            # changes from the captured piece to the moving piece. This
-            # gives a strong hint which destination square to choose.
-
-            # Compute which squares were occupied in both frames but changed label
             label_change_sqs: List[str] = []
             if self._last_pieces_for_debug is not None and pieces is not None:
                 for sq in (chess.square_name(s) for s in chess.SQUARES):
@@ -703,27 +674,23 @@ class MoveTracker:
                             label_change_sqs.append(sq)
 
             if label_change_sqs:
-                # Restrict to candidates capturing to one of the label-changed squares
-                lc_set = set(label_change_sqs)
+                label_change_set = set(label_change_sqs)
                 restricted: List[chess.Move] = [
-                    m for m in candidates if chess.square_name(m.to_square) in lc_set
+                    m
+                    for m in candidates
+                    if chess.square_name(m.to_square) in label_change_set
                 ]
                 if restricted:
                     if self._debug:
                         _log.debug(
-                            "[MoveTracker] label-change filter reduced candidates from %d to %d",
+                            "[MoveTracker] label-change filter reduced candidates "
+                            "from %d to %d",
                             len(candidates),
                             len(restricted),
                         )
                     candidates = restricted
 
         if len(candidates) > 1:
-            # Use move-local label evidence to disambiguate.
-            # Instead of demanding a full-board label match (too strict
-            # and brittle with occasional mislabels), we only look at the
-            # destination square label. If it exists and matches the piece
-            # that would be on that square after the move, we consider it
-            # supporting evidence for that candidate.
             label_filtered: List[chess.Move] = []
             for move in candidates:
                 try:
@@ -732,15 +699,12 @@ class MoveTracker:
                     to_piece = tmp.piece_at(move.to_square)
                     to_sq_name = chess.square_name(move.to_square)
                     to_label = pieces.get(to_sq_name)
-                    # If a label is present on the destination square, it must match.
-                    # If there is no label, we don't reject the move (remain agnostic).
                     if to_label is None or (
-                            to_piece is not None and self._label_matches_piece(to_label, to_piece)
+                            to_piece is not None
+                            and self._label_matches_piece(to_label, to_piece)
                     ):
                         label_filtered.append(move)
                 except (ValueError, AssertionError):
-                    # Be conservative: if anything goes wrong with temp push,
-                    # do not use label filtering for this move.
                     pass
 
             if label_filtered:
@@ -755,8 +719,8 @@ class MoveTracker:
             else:
                 if self._debug:
                     _log.debug(
-                        "[MoveTracker] move-local label filter rejected all occupancy "
-                        "candidates, keeping occupancy only result",
+                        "[MoveTracker] move-local label filter rejected all "
+                        "occupancy candidates, keeping occupancy only result",
                     )
 
         if self._debug and candidates:
@@ -786,9 +750,6 @@ class MoveTracker:
         """
         Convenience wrapper to accept a DetectionState container produced by
         Stage 2 and delegate to the main update_from_state API.
-
-        Keeps separation of concerns: Stage 3 consumes only logical state
-        (occupancy + labels) and does not depend on raw boxes/confidences.
         """
         return self.update_from_state(state.occupancy, state.pieces)
 
@@ -797,9 +758,9 @@ class MoveTrackerWorker(threading.Thread):
     """
     Optional worker that runs MoveTracker in a background thread.
 
-    detection thread puts (occupancy, pieces) states into input_queue.
+    The detection thread puts (occupancy, pieces) states into input_queue.
     This worker consumes them and runs update_from_state.
-    Confirmed detected_moves are pushed into output_queue as MoveInfo.
+    Confirmed moves are pushed into output_queue as MoveInfo.
     """
 
     def __init__(
