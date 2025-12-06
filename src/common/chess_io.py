@@ -7,7 +7,7 @@ from typing import List, Optional
 import chess
 import chess.pgn
 
-from . import config
+from src import config
 from .app_logging import get_logger
 from .io_utils import ensure_parent_dir
 from .types import MoveInfo
@@ -17,11 +17,11 @@ _log = get_logger(__name__)
 
 def write_moves_txt(moves: List[str], out_path: Optional[Path] = None) -> None:
     """
-    Write the finished game in PGN format and include a Lichess link.
+    Write the finished game in PGN format.
 
-    moves: list of SAN strings in order.
-    out_path: optional override for the output file path. Defaults to
-              config.GAME_MOVES_TXT_PATH.
+    - moves: list of SAN strings in order.
+    - out_path: optional override for the output file path. Defaults to
+      config.GAME_MOVES_TXT_PATH.
     """
     if not moves:
         return
@@ -62,7 +62,7 @@ def write_moves_txt(moves: List[str], out_path: Optional[Path] = None) -> None:
                 f.write(" ".join(moves) + "\n")
             _log.info("Moves written to %s (SAN only)", out_path)
         except OSError as e:
-            _log.warning("Could not write moves to %s: %s", out_path, e)
+            _log.warning("Could not write detected_moves to %s: %s", out_path, e)
         return
 
     # Result policy: only declare a result on checkmate; otherwise use "*"

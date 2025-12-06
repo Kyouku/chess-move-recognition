@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import List
 
 from src import config
-from src.app_logging import get_logger
-from src.pipeline_comparison.common import (
+from src.common.app_logging import get_logger
+from src.common.types import DetectionState, MoveInfo
+from src.pipeline.comparison.common import (
     PipelineResult,
     iter_time_based_should_process,
 )
 from src.stage3.move_tracking import MoveTracker
-from src.types import DetectionState, MoveInfo
 
 _log = get_logger(__name__)
 

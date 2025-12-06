@@ -5,22 +5,17 @@ import queue
 from typing import Optional, Tuple, Dict, List
 
 from src import config
-from src.app_logging import get_logger, set_log_level
-from src.chess_io import write_moves_txt, append_move_log
+from src.common.app_logging import get_logger, set_log_level
+from src.common.chess_io import write_moves_txt, append_move_log
+from src.common.types import MoveInfo, DetectionState
 from src.pipeline.live_base import (
     BaseLivePipeline,
     get_capture_source,
     CaptureSource,
 )
 from src.stage3.move_tracking import MoveTracker, MoveTrackerWorker
-from src.types import MoveInfo, DetectionState
 
 _log = get_logger(__name__)
-
-"""
-Move logging is handled by src.chess_io.append_move_log for reuse across modules.
-"""
-
 
 class MultiStagePipeline(BaseLivePipeline):
     """
@@ -67,7 +62,7 @@ class MultiStagePipeline(BaseLivePipeline):
             name="MoveTrackerWorker-1",
         )
 
-        # Collected SAN moves for summary / PGN export
+        # Collected SAN detected_moves for summary / PGN export
         self.moves: List[str] = []
 
     # ------------------------------------------------------------------
@@ -87,7 +82,7 @@ class MultiStagePipeline(BaseLivePipeline):
             pass
 
     def after_detection_batch(self) -> None:
-        # Drain finished moves from the move worker
+        # Drain finished detected_moves from the move worker
         while True:
             try:
                 info: MoveInfo = self.move_out_queue.get_nowait()
@@ -114,11 +109,11 @@ class MultiStagePipeline(BaseLivePipeline):
                 _log.info(
                     "[MAIN] Checkmate detected. Saving game and resetting to initial position...",
                 )
-                # Save current game moves to PGN/text
+                # Save current game detected_moves to PGN/text
                 try:
                     write_moves_txt(self.moves)
                 except (OSError, ValueError) as e:
-                    _log.warning("Failed to write game moves on game over: %s", e)
+                    _log.warning("Failed to write game detected_moves on game over: %s", e)
 
                 # Clear current move list
                 self.moves.clear()
@@ -135,7 +130,7 @@ class MultiStagePipeline(BaseLivePipeline):
                     pass
 
     def on_stop(self) -> None:
-        # Join move worker and write remaining moves, if any
+        # Join move worker and write remaining detected_moves, if any
         try:
             self.move_worker.join(timeout=1.0)
         except RuntimeError:
@@ -145,7 +140,7 @@ class MultiStagePipeline(BaseLivePipeline):
             try:
                 write_moves_txt(self.moves)
             except (OSError, ValueError) as e:
-                _log.warning("Failed to write game moves on shutdown: %s", e)
+                _log.warning("Failed to write game detected_moves on shutdown: %s", e)
 
 
 def run_live(

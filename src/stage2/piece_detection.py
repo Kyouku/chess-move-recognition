@@ -7,8 +7,8 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-from src.app_logging import get_logger
-from src.types import DetectionState
+from src.common.app_logging import get_logger
+from src.common.types import DetectionState
 from .piece_overlay import _compute_square_boxes, _piece_code_from_label
 
 _log = get_logger(__name__)
@@ -18,9 +18,9 @@ def _square_name(rank_idx: int, file_idx: int) -> str:
     """
     Map (rank_idx, file_idx) to a square like "a1".
 
-    Convention:
-      rank_idx: 0 top .. squares-1 bottom  -> a..h
-      file_idx: 0 left .. squares-1 right  -> 1..8
+    Convention (naming preserved for backward compatibility):
+      - rank_idx: 0..squares-1 maps across files 'a'.. (columns, left to right)
+      - file_idx: 0..squares-1 maps across ranks '1'.. (rows, bottom to top)
     """
     file_char = chr(ord("a") + rank_idx)
     rank_char = str(file_idx + 1)

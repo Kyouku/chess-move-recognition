@@ -5,8 +5,9 @@ from typing import Dict, Optional
 import chess
 
 from src import config
-from src.app_logging import get_logger
-from src.chess_io import append_fen_log
+from src.common.app_logging import get_logger
+from src.common.chess_io import append_fen_log
+from src.common.types import DetectionState
 from src.pipeline.fen_utils import (
     detection_state_to_fen,
     detection_state_to_placement,
@@ -16,15 +17,8 @@ from src.pipeline.live_base import (
     get_capture_source,
     CaptureSource,
 )
-from src.types import DetectionState
 
 _log = get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# FEN helpers are provided by src.pipeline.fen_utils
-# ---------------------------------------------------------------------------
-
 
 # ---------------------------------------------------------------------------
 # Single frame live baseline: FEN only

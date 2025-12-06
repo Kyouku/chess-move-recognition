@@ -11,11 +11,11 @@ import numpy as np
 
 from src import config
 from src.app_gui import show_image, wait_key, destroy_all_windows, enable_gui
-from src.app_logging import get_logger
+from src.common.app_logging import get_logger
+from src.common.types import DetectionState
 from src.stage1.board_rectifier import LivePipeline
 from src.stage2.piece_detection import PieceDetector
 from src.stage2.piece_overlay import draw_piece_overlay
-from src.types import DetectionState
 
 _log = get_logger(__name__)
 
@@ -180,7 +180,7 @@ def _calibrate_pipeline(
 
     For camera sources this requests the same resolution as used at runtime.
     """
-    # First try to load a previously saved homography and skip calibration
+    # First try to load a previously saved homography and skip re-calibration
     try:
         use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
         if use_saved:
@@ -196,7 +196,7 @@ def _calibrate_pipeline(
                             _log.info("Loaded saved homography from %s", h_file)
                             return True
                         _log.warning(
-                            "Saved homography at %s is invalid; falling back to calibration.",
+                            "Saved homography at %s is invalid; falling back to saved_h_cache.",
                             h_file,
                         )
                     else:
@@ -214,7 +214,7 @@ def _calibrate_pipeline(
 
     temp_cap = cv2.VideoCapture(source)
     if not temp_cap.isOpened():
-        _log.error("Could not open source for calibration: %s", source)
+        _log.error("Could not open source for saved_h_cache: %s", source)
         return False
 
     try:

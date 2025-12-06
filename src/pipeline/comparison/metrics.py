@@ -257,7 +257,7 @@ def move_reconstruction_rate(
     """
     Move Reconstruction Rate (MRR) as used in the thesis:
 
-      fraction of moves in a game that are reconstructed correctly,
+      fraction of detected_moves in a game that are reconstructed correctly,
       counted over the entire sequence.
 
     This is identical to sequence level move accuracy.

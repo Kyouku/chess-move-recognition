@@ -5,16 +5,16 @@ from typing import List, Optional
 import chess
 
 from src import config
-from src.app_logging import get_logger
+from src.common.app_logging import get_logger
+from src.common.types import DetectionState
+from src.pipeline.comparison.common import (
+    PipelineResult,
+    iter_time_based_should_process,
+)
 from src.pipeline.fen_utils import (
     detection_state_to_fen,
     detection_state_to_placement,
 )
-from src.pipeline_comparison.common import (
-    PipelineResult,
-    iter_time_based_should_process,
-)
-from src.types import DetectionState
 
 _log = get_logger(__name__)
 
@@ -25,7 +25,7 @@ _log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Baseline runner: reconstruct moves from FEN snapshots
+# Baseline runner: reconstruct detected_moves from FEN snapshots
 # ---------------------------------------------------------------------------
 
 
@@ -39,20 +39,20 @@ class _BaselineRunner:
       - For each processed frame:
           * Build a placement string from detections.
           * If placement equals the reference board, no move happened.
-          * Otherwise, search all legal moves of the reference board and check
-            which moves lead to the detected placement.
+          * Otherwise, search all legal detected_moves of the reference board and check
+            which detected_moves lead to the detected placement.
           * If exactly one move matches, propose that move.
           * Use debouncing over several frames before confirming a move.
           * If no unique move exists, mark this as a missing move region and
             skip the FEN, keeping the reference board unchanged so that later
-            correct FENs can still produce valid moves.
+            correct FENs can still produce valid detected_moves.
 
     The runner also keeps a logical move index that counts both confirmed
-    moves and missing move regions. This allows numbering moves as
+    detected_moves and missing move regions. This allows numbering detected_moves as
 
       (move 7)
 
-    even if only two moves were actually reconstructed and five are missing
+    even if only two detected_moves were actually reconstructed and five are missing
     between them.
     """
 
@@ -67,14 +67,14 @@ class _BaselineRunner:
             getattr(config, "START_MIN_CONFIRM_FRAMES", 4),
         )
 
-        # Debouncing for proposed moves
+        # Debouncing for proposed detected_moves
         self._pending_uci: Optional[str] = None
         self._pending_count: int = 0
         self._confirm_frames: int = int(
             getattr(config, "MOVE_MIN_CONFIRM_FRAMES", 2),
         )
 
-        # Current reference board (updated only on confirmed moves)
+        # Current reference board (updated only on confirmed detected_moves)
         self._board: Optional[chess.Board] = None
 
         # Missing move statistics
@@ -83,7 +83,7 @@ class _BaselineRunner:
         self.missing_moves: int = 0
         self._in_missing_segment: bool = False
 
-        # Logical move index including missing moves
+        # Logical move index including missing detected_moves
         # First real move after the initial position has index 1.
         self._next_ply_index: int = 1
 
@@ -124,7 +124,7 @@ class _BaselineRunner:
 
         san is left as None since reconstruction is driven only by FEN
         snapshots. fen_after is the FEN derived from detections.
-        ply_index is the logical move index including missing moves.
+        ply_index is the logical move index including missing detected_moves.
         """
         placement = detection_state_to_placement(state)
 
@@ -214,7 +214,7 @@ class _BaselineRunner:
         san: Optional[str] = None
         fen_after: Optional[str] = detection_state_to_fen(state)
 
-        # Logical move index including missing moves
+        # Logical move index including missing detected_moves
         ply_index = self._next_ply_index
         self._next_ply_index += 1
 
@@ -235,9 +235,9 @@ def run_baseline(
     """
     Offline single frame baseline with FEN based move reconstruction.
 
-    Per frame FENs and reconstructed moves are collected in the returned
+    Per frame FENs and reconstructed detected_moves are collected in the returned
     PipelineResult. Detailed logging of selected FENs is handled by the
-    comparison driver.
+    comparison_results driver.
 
     If video_fps and detector_fps are provided and detector_fps < video_fps,
     a time based live sampling approximation is used. The detector is modeled
@@ -282,11 +282,11 @@ def run_baseline(
     if not runner._initialized:
         _log.info(
             "[BASELINE OFFLINE] initial position was never locked, "
-            "no moves reconstructed",
+            "no detected_moves reconstructed",
         )
     else:
         _log.info(
-            "[BASELINE OFFLINE] missing move segments=%d, frames=%d, moves=%d",
+            "[BASELINE OFFLINE] missing move segments=%d, frames=%d, detected_moves=%d",
             runner.missing_segments,
             runner.missing_frames,
             runner.missing_moves,

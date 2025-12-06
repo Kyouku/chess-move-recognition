@@ -7,8 +7,8 @@ from typing import Dict, List, Optional, Iterable, Tuple
 
 import chess
 
-from src.app_logging import get_logger
-from src.types import PieceDetection, MoveInfo, DetectionState
+from src.common.app_logging import get_logger
+from src.common.types import PieceDetection, MoveInfo, DetectionState
 
 _log = get_logger(__name__)
 
@@ -122,7 +122,7 @@ def _sorted_squares() -> List[str]:
 class MoveTracker:
     """
     Keeps track of the chess game state using python chess and
-    derives moves from temporally filtered occupancy maps.
+    derives detected_moves from temporally filtered occupancy maps.
 
     The dictionaries passed in (occupancy, pieces) use the same
     algebraic square names as python chess, for example "e4".
@@ -165,7 +165,7 @@ class MoveTracker:
     def is_initialized(self) -> bool:
         """
         True once the tracker has locked on the initial position
-        and started tracking moves.
+        and started tracking detected_moves.
         """
         return self._initialized
 
@@ -297,7 +297,7 @@ class MoveTracker:
             target_occ: Dict[str, bool],
     ) -> List[chess.Move]:
         """
-        Search among all legal moves for those that produce the observed
+        Search among all legal detected_moves for those that produce the observed
         occupancy pattern only.
         """
         candidates: List[chess.Move] = []
@@ -311,7 +311,7 @@ class MoveTracker:
 
         if self._debug:
             _log.debug(
-                "[MoveTracker] occupancy only candidate search: found %d moves",
+                "[MoveTracker] occupancy only candidate search: found %d detected_moves",
                 len(candidates),
             )
 
@@ -323,7 +323,7 @@ class MoveTracker:
             target_pieces: Dict[str, Optional[str]],
     ) -> List[chess.Move]:
         """
-        Search among all legal moves for those that produce the observed
+        Search among all legal detected_moves for those that produce the observed
         board state (occupancy plus piece labels).
         """
         candidates: List[chess.Move] = []
@@ -339,7 +339,7 @@ class MoveTracker:
 
         if self._debug:
             _log.debug(
-                "[MoveTracker] full state candidate search: found %d moves",
+                "[MoveTracker] full state candidate search: found %d detected_moves",
                 len(candidates),
             )
 
@@ -417,7 +417,7 @@ class MoveTracker:
         Handle auto initialization based on the filtered occupancy.
 
         Returns True if we are still in the waiting phase or just finished
-        initialization and should not search for moves in this frame.
+        initialization and should not search for detected_moves in this frame.
         """
         if self._initialized or not self._waiting_for_start:
             return False
@@ -648,7 +648,7 @@ class MoveTracker:
 
         Implementation detail:
           First search based on occupancy only.
-          If there are multiple candidate moves, try to use labels
+          If there are multiple candidate detected_moves, try to use labels
           as a soft filter. If labels do not help, fall back to
           pure occupancy candidates.
         """
@@ -799,7 +799,7 @@ class MoveTrackerWorker(threading.Thread):
 
     detection thread puts (occupancy, pieces) states into input_queue.
     This worker consumes them and runs update_from_state.
-    Confirmed moves are pushed into output_queue as MoveInfo.
+    Confirmed detected_moves are pushed into output_queue as MoveInfo.
     """
 
     def __init__(

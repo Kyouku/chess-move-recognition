@@ -6,12 +6,12 @@ import cv2
 import numpy as np
 
 from src.app_gui import is_enabled, create_window, destroy_window, set_mouse_callback, show_image, wait_key
-from src.app_logging import get_logger
+from src.common.app_logging import get_logger
 
 _log = get_logger(__name__)
 
 # -------------------------------------------------------------
-# Helpers for auto calibration
+# Helpers for automatic calibration
 # -------------------------------------------------------------
 
 
@@ -158,7 +158,7 @@ def _auto_homography_from_frame_pre(
 
     if area_ratio < float(min_board_area_ratio):
         try:
-            from ..app_logging import get_logger  # local import to avoid cycles
+            from src.common.app_logging import get_logger  # local import to avoid cycles
             _log_local = get_logger(__name__)
             _log_local.debug(
                 "[Stage1] Rejecting candidate: board_area_ratio=%.4f < min=%.4f",
@@ -296,19 +296,19 @@ class LivePipeline:
             max_frames: int = 300,
     ) -> bool:
         """
-        Auto calibration from a short sequence. If automatic calibration
-        succeeds, no calibration window is shown. Only if automatic
-        calibration fails, a manual calibration window is displayed to
-        let the user select the four board corners.
+        Perform calibration from a short sequence. If automatic calibration
+        succeeds, no manual window is shown. Only if automatic calibration
+        fails, a manual calibration window is displayed to let the user
+        select the four board corners.
         """
         win_name = "Calibration"
 
         auto_limit = max_frames
         last_pre_frame: Optional[np.ndarray] = None
 
-        _log.info("Starting automatic calibration (silent).")
+        _log.info("Starting automatic saved_h_cache (silent).")
         _log.debug(
-            "[Stage1] Auto-calibration params: target_long_edge=%d, board_size_px=%d, min_board_area_ratio=%.3f",
+            "[Stage1] Auto-saved_h_cache params: target_long_edge=%d, board_size_px=%d, min_board_area_ratio=%.3f",
             self._target_long_edge,
             self.board_size_px,
             self._min_board_area_ratio,
@@ -335,7 +335,7 @@ class LivePipeline:
                 self._min_board_area_ratio,
             )
 
-            # No GUI during auto calibration; run silently
+            # No GUI during automatic calibration; run silently
 
             if h_total is None:
                 continue
@@ -357,16 +357,16 @@ class LivePipeline:
         # Manual fallback only when GUI is active
         if not is_enabled():
             _log.warning(
-                "Auto calibration did not find a board and GUI is disabled, "
-                "manual calibration is not possible."
+                "Auto saved_h_cache did not find a board and GUI is disabled, "
+                "manual saved_h_cache is not possible."
             )
             return False
 
         _log.info(
-            "Auto calibration did not find a board, switching to manual corner selection."
+            "Auto saved_h_cache did not find a board, switching to manual corner selection."
         )
         if last_pre_frame is None:
-            _log.warning("No frame available for manual calibration.")
+            _log.warning("No frame available for manual saved_h_cache.")
             return False
 
         # Create the window only for manual calibration
@@ -382,9 +382,9 @@ class LivePipeline:
 
         self._is_calibrated = manual_ok
         if manual_ok:
-            _log.info("Manual calibration successful.")
+            _log.info("Manual saved_h_cache successful.")
         else:
-            _log.warning("Manual calibration failed.")
+            _log.warning("Manual saved_h_cache failed.")
 
         return manual_ok
 
@@ -396,14 +396,14 @@ class LivePipeline:
     ) -> bool:
         """
         Manual calibration.
-        User clicks 4 corners of the board on the pre resized frame:
+        User clicks 4 corners of the board on the pre-resized frame:
         1 top left
         2 top right
         3 bottom right
         4 bottom left
         """
         if not is_enabled():
-            _log.warning("Manual calibration requested but GUI is disabled.")
+            _log.warning("Manual saved_h_cache requested but GUI is disabled.")
             return False
 
         points: list[tuple[int, int]] = []
@@ -444,13 +444,13 @@ class LivePipeline:
             show_image(win_name, display)
             key = wait_key(20)
             if key == 27:
-                _log.info("Manual calibration cancelled.")
+                _log.info("Manual saved_h_cache cancelled.")
                 return False
             if key in (13, 32) and len(points) == 4:
                 break
 
         if len(points) != 4:
-            _log.warning("Need exactly 4 points for calibration.")
+            _log.warning("Need exactly 4 points for saved_h_cache.")
             return False
 
         src = np.array(points, dtype=np.float32)

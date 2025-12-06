@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 
-from src.types import DetectionState
+from src.common.types import DetectionState
 
 
 def placement_from_fen(fen: str) -> str:

@@ -10,11 +10,11 @@ import cv2
 import numpy as np
 
 from src import config
-from src.app_logging import get_logger
-from src.io_utils import ensure_parent_dir
+from src.common.app_logging import get_logger
+from src.common.io_utils import ensure_parent_dir
+from src.common.types import DetectionState
 from src.stage1.board_rectifier import LivePipeline
 from src.stage2.piece_detection import PieceDetector
-from src.types import DetectionState
 
 _log = get_logger(__name__)
 
@@ -121,7 +121,7 @@ def record_detections(
                             ok = True
                         else:
                             _log.warning(
-                                "Saved homography at %s is invalid; falling back to calibration.",
+                                "Saved homography at %s is invalid; falling back to saved_h_cache.",
                                 h_file,
                             )
                     else:

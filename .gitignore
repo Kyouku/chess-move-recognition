@@ -33,10 +33,10 @@ notebooks/.ipynb_cache/
 # === DATA & MODEL FILES ===
 # (Large or local-only data that should not be committed)
 data/raw/
-data/processed/
-data/raw_images/
+data/images/processed_images/
+data/images/raw_images/
 data/videos/
-data/calibration/
+data/saved_h_cache/
 data/labels/
 data/tmp/
 datasets/
@@ -54,9 +54,9 @@ results/
 *.yaml             # config exports (keep only your template)
 
 # Project-specific training artifacts
-training_data/
+training/
 
-# Live run artifacts (game logs/moves)
+# Live run artifacts (game detections/detected_moves)
 src/pipeline/game_moves/*.log
 src/pipeline/game_moves/*.txt
 pipeline/game_moves/*.log

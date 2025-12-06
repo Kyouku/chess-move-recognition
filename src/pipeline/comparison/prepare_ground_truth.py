@@ -10,18 +10,18 @@ import chess
 import chess.pgn
 import cv2
 
-from src.app_logging import get_logger
+from src.common.app_logging import get_logger
 
 _log = get_logger(__name__)
 
 """
-python -m src.pipeline_comparison.prepare_ground_truth --video data/videos/game1.mp4 --pgn data/gt/testgame.pgn --out data/gt/testgame.json
+python -m src.comparison_results.prepare_ground_truth --video data/videos/game1.mp4 --pgn data/gt/testgame.pgn --out data/gt/testgame.json
 """
 
 
 def _load_pgn_moves(pgn_path: Path) -> Tuple[str, List[str]]:
     """
-    Load PGN text and return it together with the main line moves in SAN.
+    Load PGN text and return it together with the main line detected_moves in SAN.
     """
     text = pgn_path.read_text(encoding="utf8")
     game_io = io.StringIO(text)
@@ -215,7 +215,7 @@ def annotate_game(
         # Mark current frame as stable board after current ply
         elif key == ord("m"):
             if ply_idx >= total_plies:
-                _log.info("All plies already processed, nothing to mark")
+                _log.info("All plies already processed_images, nothing to mark")
             else:
                 ply_num = ply_idx + 1
                 frame_for_ply[ply_num] = frame_idx

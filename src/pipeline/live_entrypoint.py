@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from src import config
-from src.app_logging import get_logger, set_log_level
+from src.common.app_logging import get_logger, set_log_level
 from src.pipeline.live_base import get_capture_source, CaptureSource, BaseLivePipeline
 from src.pipeline.multistage.live_multistage_main import MultiStagePipeline
 from src.pipeline.singleframe.live_singleframe_main import SingleFramePipeline

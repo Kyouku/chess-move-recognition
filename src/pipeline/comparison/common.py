@@ -17,9 +17,9 @@ class PipelineResult:
         directly from detections for frame i. Only the placement
         field is meaningful for comparison with ground truth.
     - moves_uci:
-        Detected moves in UCI notation, in chronological order.
+        Detected detected_moves in UCI notation, in chronological order.
     - moves_san:
-        Detected moves in SAN notation, in the same order as moves_uci.
+        Detected detected_moves in SAN notation, in the same order as moves_uci.
         May contain empty strings if a pipeline does not compute SAN.
     - move_frames:
         For each detected move in moves_uci, the frame index at which the

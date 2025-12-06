@@ -9,8 +9,9 @@ PROJECT_ROOT: Path = _SRC_DIR.parent
 MODELS_DIR: Path = PROJECT_ROOT / "models"
 DATA_DIR: Path = PROJECT_ROOT / "data"
 VIDEOS_DIR: Path = DATA_DIR / "videos"
-CALIBRATION_DIR: Path = _SRC_DIR / "pipeline" / "calibration"
-GAME_MOVES_DIR: Path = _SRC_DIR / "pipeline" / "moves_log"
+# Persisted artifacts should live under the data/ tree
+CALIBRATION_DIR: Path = DATA_DIR / "saved_h_cache"
+GAME_MOVES_DIR: Path = DATA_DIR / "detected_moves"
 
 # Input source
 # The live app automatically probes the actual source dimensions.
@@ -56,7 +57,7 @@ CALIBRATION_TARGET_LONG_EDGE: int = BOARD_SIZE_PX
 DETECTION_WORKERS: int = 1
 
 # Logging for multistage move tracker
-MOVES_LOG_PATH: Path = GAME_MOVES_DIR / "moves.log"
+MOVES_LOG_PATH: Path = GAME_MOVES_DIR / "detected_moves.log"
 GAME_MOVES_TXT_PATH: Path = GAME_MOVES_DIR / "game_moves.txt"
 
 # Logging for single frame FEN baseline

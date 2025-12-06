@@ -66,7 +66,7 @@ Choosing the pipeline
 
 Outputs
 
-- Live move logs and game summaries are written to src/pipeline/game_moves/ (paths configurable in src/config.py). These
+- Live move logs and game summaries are written to data/detected_moves/ (paths configurable in src/config.py). These
   files are ignored by Git by default.
 
 Troubleshooting

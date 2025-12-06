@@ -5,16 +5,15 @@ from pathlib import Path
 from statistics import mean
 from typing import List, Optional, Dict
 
-from src.app_logging import get_logger, set_log_level
-from src.pipeline.fen_utils import placement_from_fen
-from src.pipeline_comparison.baseline_offline import run_baseline
-from src.pipeline_comparison.common import PipelineResult
-from src.pipeline_comparison.detection_log import (
+from src.common.app_logging import get_logger, set_log_level
+from src.pipeline.comparison.baseline_offline import run_baseline
+from src.pipeline.comparison.common import PipelineResult
+from src.pipeline.comparison.detection_log import (
     DetectionLog,
     record_detections,
     load_detections,
 )
-from src.pipeline_comparison.metrics import (
+from src.pipeline.comparison.metrics import (
     GroundTruth,
     fen_interval_accuracy,
     fen_interval_counts,
@@ -23,7 +22,8 @@ from src.pipeline_comparison.metrics import (
     move_detection_delays,
     move_reconstruction_rate,
 )
-from src.pipeline_comparison.multistage_offline import run_multistage
+from src.pipeline.comparison.multistage_offline import run_multistage
+from src.pipeline.fen_utils import placement_from_fen
 
 _log = get_logger(__name__)
 
@@ -31,16 +31,16 @@ _log = get_logger(__name__)
 """
 Example usage:
 
-python -m src.pipeline_comparison.compare_pipelines \
+python -m src.comparison_results.compare_pipelines \
   --video data/videos/game1.mp4 \
-  --detections data/logs/game1.pkl \
+  --detections data/detections/game1.pkl \
   --gt data/gt/game1.json
 """
 
 
 def _log_moves_with_fens(name: str, result: PipelineResult) -> None:
     """
-    Log all committed moves for a pipeline together with the FEN at the
+    Log all committed detected_moves for a pipeline together with the FEN at the
     committing frame.
     """
     for idx, (uci, frame_idx) in enumerate(
@@ -92,7 +92,7 @@ def _log_baseline_fens(
         if not has_move and not matches_gt:
             continue
 
-        # Avoid duplicate logs when the placement does not change
+        # Avoid duplicate detections when the placement does not change
         # across consecutive frames in the baseline.
         if placement == last_printed_placement:
             continue
@@ -104,7 +104,7 @@ def _log_baseline_fens(
 
         move_txt = ""
         if moves_for_frame:
-            move_txt = " moves " + ", ".join(moves_for_frame) + " |"
+            move_txt = " detected_moves " + ", ".join(moves_for_frame) + " |"
 
         reason_parts: List[str] = []
         if has_move:
@@ -149,7 +149,7 @@ def _report_for_pipeline(name: str, result: PipelineResult, gt: GroundTruth) -> 
         total_f,
     )
 
-    # Only pipelines that emit moves are evaluated with MRR and delays
+    # Only pipelines that emit detected_moves are evaluated with MRR and delays
     if result.moves_uci:
         correct_m, total_m = move_accuracy_counts(result.moves_uci, gt.moves_uci)
         mrr = move_reconstruction_rate(result.moves_uci, gt.moves_uci)
@@ -172,7 +172,7 @@ def _report_for_pipeline(name: str, result: PipelineResult, gt: GroundTruth) -> 
                 )
     else:
         _log.info(
-            "[%s] no moves emitted by this pipeline, MRR and delays are not applicable",
+            "[%s] no detected_moves emitted by this pipeline, MRR and delays are not applicable",
             name,
         )
 
@@ -182,7 +182,7 @@ def run_comparison(
         gt_path: Path | None = None,
 ) -> None:
     """
-    Orchestrate offline comparison between the single frame baseline and the
+    Orchestrate offline comparison_results between the single frame baseline and the
     multistage tracker using a recorded detection log.
 
     Both pipelines are run once, their results are stored, and afterwards
@@ -226,8 +226,8 @@ def run_comparison(
     )
     _log.debug("Finished multistage pass")
 
-    _log.info("Baseline emitted %d moves", len(baseline.moves_uci))
-    _log.info("Multistage emitted %d moves", len(multistage.moves_uci))
+    _log.info("Baseline emitted %d detected_moves", len(baseline.moves_uci))
+    _log.info("Multistage emitted %d detected_moves", len(multistage.moves_uci))
 
     gt: Optional[GroundTruth] = None
     if gt_path is None:
@@ -237,7 +237,7 @@ def run_comparison(
     else:
         _log.debug("Loading ground truth from %s", gt_path)
         gt = load_ground_truth(gt_path)
-        _log.info("Ground truth has %d moves", len(gt.moves_uci))
+        _log.info("Ground truth has %d detected_moves", len(gt.moves_uci))
         _log.debug("Evaluating metrics against ground truth")
 
         _report_for_pipeline("baseline", baseline, gt)
@@ -245,11 +245,11 @@ def run_comparison(
 
     # Second phase: log selected FENs from both pipelines
     _log.info(
-        "Logging baseline FENs with legal moves or matching ground truth positions",
+        "Logging baseline FENs with legal detected_moves or matching ground truth positions",
     )
     _log_baseline_fens(baseline, gt)
 
-    _log.info("Logging multistage moves and their FENs")
+    _log.info("Logging multistage detected_moves and their FENs")
     _log_moves_with_fens("multistage", multistage)
 
 
