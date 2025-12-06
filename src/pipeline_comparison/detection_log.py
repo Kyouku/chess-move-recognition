@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import cv2
+import numpy as np
 
 from src import config
 from src.app_logging import get_logger
@@ -103,14 +104,80 @@ def record_detections(
         min_iou=float(getattr(config, "MIN_IOU", 0.15)),
     )
 
-    _log.info("Calibrating LivePipeline from video %s", video_path)
-    ok = pipeline.calibrate_from_capture(
-        cap,
-        max_frames=int(getattr(config, "CALIBRATION_MAX_FRAMES", 200)),
-    )
+    # Try to use a saved homography if configured
+    ok = False
+    try:
+        use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
+        if use_saved:
+            h_path = getattr(config, "HOMOGRAPHY_PATH", None)
+            if h_path is not None:
+                try:
+                    h_file = Path(h_path)
+                    if h_file.exists():
+                        H = np.load(str(h_file))
+                        if isinstance(H, np.ndarray) and H.shape == (3, 3) and np.isfinite(H).all():
+                            pipeline._H_board = H.astype(np.float32)  # type: ignore[attr-defined]
+                            pipeline._is_calibrated = True  # type: ignore[attr-defined]
+                            _log.info("Loaded saved homography from %s", h_file)
+                            ok = True
+                        else:
+                            _log.warning(
+                                "Saved homography at %s is invalid; falling back to calibration.",
+                                h_file,
+                            )
+                    else:
+                        _log.info(
+                            "Configured to use saved homography, but file not found at %s; calibrating.",
+                            h_file,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    _log.warning("Failed to load saved homography: %s; calibrating instead.", exc)
+    except Exception:
+        # If config attributes are missing or any error occurs, just proceed with calibration
+        pass
+
+    # Calibrate if no valid saved homography was used
     if not ok:
-        cap.release()
-        raise RuntimeError(f"Calibration failed for video {video_path}")
+        _log.info("Calibrating LivePipeline from video %s", video_path)
+        ok = pipeline.calibrate_from_capture(
+            cap,
+            max_frames=int(getattr(config, "CALIBRATION_MAX_FRAMES", 200)),
+        )
+        if not ok:
+            cap.release()
+            raise RuntimeError(f"Calibration failed for video {video_path}")
+
+        # Save homography for future reuse if configured
+        try:
+            use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
+            h_path = getattr(config, "HOMOGRAPHY_PATH", None)
+            H = getattr(pipeline, "_H_board", None)
+            if use_saved and h_path is not None and isinstance(H, np.ndarray) and H.shape == (3, 3):
+                h_file = Path(h_path)
+                try:
+                    h_file.parent.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                try:
+                    np.save(str(h_file), H)
+                    # Verify quickly
+                    try:
+                        H_chk = np.load(str(h_file))
+                        if isinstance(H_chk, np.ndarray) and H_chk.shape == (3, 3):
+                            _log.info("Saved homography to %s", h_file)
+                        else:
+                            _log.warning(
+                                "Homography file written at %s but contents invalid (shape=%s)",
+                                h_file,
+                                getattr(H_chk, "shape", None),
+                            )
+                    except Exception as exc:
+                        _log.warning("Homography save verification failed for %s: %s", h_file, exc)
+                except Exception as exc:
+                    _log.warning("Failed to save homography to %s: %s", h_file, exc)
+        except Exception:
+            # Do not fail the recording if saving failed
+            pass
 
     # Rewind to start for detection pass
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -127,7 +194,6 @@ def record_detections(
     detections: List[DetectionState] = []
     frame_idx = 0
     t_start = time.perf_counter()
-    last_report = t_start
     report_interval = int(getattr(config, "DETECTION_PROGRESS_EVERY", 50))
 
     while True:

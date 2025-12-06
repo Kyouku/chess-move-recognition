@@ -41,13 +41,13 @@ BOARD_MARGIN_SQUARES: float = 1.7
 
 USE_VIDEO_FILE: bool = True
 # Default sample video resolved under project data/videos
-VIDEO_PATH: Path = VIDEOS_DIR / "game1.mp4"
+VIDEO_PATH: Path = VIDEOS_DIR / "game3.mp4"
 
 # Calibration
 CALIBRATION_MAX_FRAMES: int = 500
 AUTO_MIN_BOARD_AREA_RATIO: float = 0.08
 # Whether to load a previously saved homography instead of calibrating
-USE_SAVED_HOMOGRAPHY: bool = False
+USE_SAVED_HOMOGRAPHY: bool = True
 # Where to save/load the homography matrix (NumPy .npy file)
 HOMOGRAPHY_PATH: Path = CALIBRATION_DIR / "homography.npy"
 # Preprocessing size for Stage1 (auto/manual calibration and rectification)
@@ -76,9 +76,14 @@ GUI_ENABLED: bool = True
 OPENCV_NUM_THREADS: int = 0  # 0 = OpenCV decides; >0 to force a limit
 
 # Move tracker settings
-MOVE_FILTER_ALPHA: float = 0.3
-MOVE_FILTER_THRESHOLD: float = 0.65
-MOVE_MIN_CONFIRM_FRAMES: int = 5
+# Tuned for better recall in multistage while keeping stability.
+# Alpha controls responsiveness of the temporal occupancy filter.
+# Threshold is the probability cutoff for considering a square occupied.
+# min_confirm_frames is the number of consecutive frames the same candidates
+# must persist before confirming a move.
+MOVE_FILTER_ALPHA: float = 0.5
+MOVE_FILTER_THRESHOLD: float = 0.60
+MOVE_MIN_CONFIRM_FRAMES: int = 3
 MOVE_DEBUG: bool = True
 
 # Queue sizes

@@ -124,15 +124,25 @@ def move_detection_delays(
     if not gt.frame_for_ply:
         return []
 
+    # Important: iterate GT plies in chronological order and align to the
+    # next matching predicted move, not the first occurrence overall. Using
+    # list.index without a start offset can match an early false-positive
+    # prediction and produce large negative delays. We keep a moving cursor
+    # into pred_moves to ensure monotonic alignment.
     delays: List[int] = []
-    for ply_idx, gt_frame in gt.frame_for_ply.items():
+    pred_cursor = -1
+
+    for ply_idx in sorted(gt.frame_for_ply.keys()):
+        gt_frame = gt.frame_for_ply[ply_idx]
         if ply_idx <= 0 or ply_idx > len(gt.moves_uci):
             continue
         gt_move = gt.moves_uci[ply_idx - 1]
 
+        # Find next occurrence of this move at or after pred_cursor + 1
         try:
-            pos = pred_moves.index(gt_move)
+            pos = pred_moves.index(gt_move, pred_cursor + 1)
         except ValueError:
+            # No further occurrence of this GT move in predictions
             continue
 
         if pos < 0 or pos >= len(pred_move_frames):
@@ -140,5 +150,6 @@ def move_detection_delays(
 
         pred_frame = pred_move_frames[pos]
         delays.append(int(pred_frame) - int(gt_frame))
+        pred_cursor = pos
 
     return delays

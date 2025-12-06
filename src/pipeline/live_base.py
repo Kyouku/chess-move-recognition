@@ -307,8 +307,18 @@ def _probe_source_size(
 
 class BaseLivePipeline(ABC):
     """
-    Base class that wires Stage 1 (rectification) and Stage 2 (piece detection)
-    into a threaded live app. Subclasses provide Stage 3 logic (move inference).
+    Base class orchestrating the live chess pipeline.
+
+    Separation of concerns:
+    - Frame acquisition (FrameReader) — decoupled in its own thread/class
+    - Rectification (Stage 1) — handled by LivePipeline
+    - Piece detection (Stage 2) — handled by DetectionWorker thread(s)
+    - Presentation and Stage 3 logic — handled via overridable hooks
+
+    Subclasses only need to implement Stage 3 by overriding
+    handle_detection_state() and optionally the lifecycle hooks.
+    The core orchestration loop is intentionally small and delegates
+    to private helper methods for clarity and testability.
     """
 
     def __init__(
@@ -478,32 +488,13 @@ class BaseLivePipeline(ABC):
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        cv2.setUseOptimized(True)
-        # Allow users to cap OpenCV threads via config if provided
-        try:
-            if hasattr(config, "OPENCV_NUM_THREADS"):
-                threads = int(getattr(config, "OPENCV_NUM_THREADS") or 0)
-                if threads > 0:
-                    cv2.setNumThreads(threads)
-        except (AttributeError, TypeError, cv2.error):
-            pass
+        self._configure_opencv()
+        self._configure_gui()
 
-        # Respect GUI toggle from config via app_gui helper
-        enable_gui(bool(getattr(config, "GUI_ENABLED", True)))
-
-        # Calibrate Stage 1 once before starting the threads
-        if not _calibrate_pipeline(
-                self.pipeline,
-                self.source,
-                desired_width=self.width,
-                desired_height=self.height,
-        ):
+        if not self._calibrate_stage1():
             return
 
-        # Start Stage 1 + 2 threads
-        self.reader_thread.start()
-        for worker in self.det_workers:
-            worker.start()
+        self._start_core_threads()
 
         # Give subclasses a chance to start their own threads
         self.on_start()
@@ -512,75 +503,62 @@ class BaseLivePipeline(ABC):
 
         try:
             while True:
-                try:
-                    frame = self.frame_queue.get(timeout=1.0)
-                except queue.Empty:
-                    if not self.reader_thread.is_alive():
-                        _log.info("FrameReader finished")
-                        break
+                frame, finished = self._next_frame()
+                if finished:
+                    break
+                if frame is None:
                     continue
 
-                # Stage 1: rectify board
-                warped_or_raw = self.pipeline.process_frame(frame)
-
-                # Only enqueue when we have a rectified board
-                warped_board = self.pipeline.last_warped_board
-                if warped_board is not None:
-                    try:
-                        self.det_input_queue.put_nowait(warped_board)
-                    except queue.Full:
-                        # Drop if worker is busy
-                        pass
-
-                # Drain all finished detection results
-                while True:
-                    try:
-                        det_state = self.det_output_queue.get_nowait()
-                    except queue.Empty:
-                        break
-
-                    self.latest_state = det_state
-                    self.latest_pieces = det_state.pieces
-                    self.latest_boxes = det_state.boxes
-                    self.latest_confs = det_state.confidences
-
-                    # Stage 3 hook
-                    self.handle_detection_state(det_state)
-
-                # After batch hook for Stage 3
+                warped_or_raw = self._rectify_or_passthrough(frame)
+                self._try_enqueue_for_detection()
+                self._drain_detection_output()
                 self.after_detection_batch()
 
-                # Display: board (warped) or raw frame
-                display_frame = warped_or_raw if warped_or_raw is not None else frame
-
-                # Overlay only when we have labels
-                if (
-                        display_frame is not None
-                        and self.latest_pieces is not None
-                        and self.pipeline.is_calibrated
-                ):
-                    display_frame = draw_piece_overlay(
-                        display_frame,
-                        self.latest_pieces,
-                        squares=int(getattr(config, "BOARD_SQUARES", 8)),
-                        margin_squares=float(getattr(config, "BOARD_MARGIN_SQUARES", 1.7)),
-                        raw_boxes=self.latest_boxes,
-                        confidences=self.latest_confs,
-                    )
-
-                if display_frame is not None:
-                    # GUI mode shows, in console mode show_image is a NOP
-                    show_image(self.window_name, display_frame)
-
-                # Short delay for GUI, but no FPS cap for capture
-                key = wait_key(1)
-                if key == 27:  # ESC
+                display_frame = self._compose_display_frame(warped_or_raw, frame)
+                if self._handle_gui(display_frame):
                     break
         finally:
             self.stop()
 
     def stop(self) -> None:
         self.stop_event.set()
+        self._stop_core_threads()
+        # Allow subclasses to clean up their own resources
+        self.on_stop()
+        destroy_all_windows()
+        _log.info("%s stopped cleanly", self.__class__.__name__)
+
+    # ------------------------------------------------------------------
+    # Private helpers — orchestration building blocks
+    # ------------------------------------------------------------------
+
+    def _configure_opencv(self) -> None:
+        cv2.setUseOptimized(True)
+        try:
+            if hasattr(config, "OPENCV_NUM_THREADS"):
+                threads = int(getattr(config, "OPENCV_NUM_THREADS") or 0)
+                if threads > 0:
+                    cv2.setNumThreads(threads)
+        except (AttributeError, TypeError, cv2.error):
+            pass
+
+    def _configure_gui(self) -> None:
+        enable_gui(bool(getattr(config, "GUI_ENABLED", True)))
+
+    def _calibrate_stage1(self) -> bool:
+        return _calibrate_pipeline(
+            self.pipeline,
+            self.source,
+            desired_width=self.width,
+            desired_height=self.height,
+        )
+
+    def _start_core_threads(self) -> None:
+        self.reader_thread.start()
+        for worker in self.det_workers:
+            worker.start()
+
+    def _stop_core_threads(self) -> None:
         try:
             self.reader_thread.join(timeout=1.0)
         except RuntimeError:
@@ -590,7 +568,77 @@ class BaseLivePipeline(ABC):
                 worker.join(timeout=1.0)
             except RuntimeError:
                 pass
-        # Allow subclasses to clean up their own resources
-        self.on_stop()
-        destroy_all_windows()
-        _log.info("%s stopped cleanly", self.__class__.__name__)
+
+    def _next_frame(self) -> Tuple[Optional[np.ndarray], bool]:
+        """
+        Attempt to get the next frame.
+
+        Returns (frame, finished):
+        - frame: the image array or None if none is currently available
+        - finished: True if the reader thread has ended and no more frames will come
+        """
+        try:
+            return self.frame_queue.get(timeout=1.0), False
+        except queue.Empty:
+            if not self.reader_thread.is_alive():
+                _log.info("FrameReader finished")
+                return None, True
+            return None, False
+
+    def _rectify_or_passthrough(self, frame: np.ndarray) -> Optional[np.ndarray]:
+        """Run Stage 1 rectification and return warped board if available, else None.
+
+        Also returns None if rectification is not ready; callers can fallback to the
+        original frame for display when this returns None.
+        """
+        return self.pipeline.process_frame(frame)
+
+    def _try_enqueue_for_detection(self) -> None:
+        warped_board = self.pipeline.last_warped_board
+        if warped_board is None:
+            return
+        try:
+            self.det_input_queue.put_nowait(warped_board)
+        except queue.Full:
+            # Drop if workers are busy (we always want the latest frame)
+            pass
+
+    def _drain_detection_output(self) -> None:
+        while True:
+            try:
+                det_state = self.det_output_queue.get_nowait()
+            except queue.Empty:
+                break
+
+            self.latest_state = det_state
+            self.latest_pieces = det_state.pieces
+            self.latest_boxes = det_state.boxes
+            self.latest_confs = det_state.confidences
+
+            self.handle_detection_state(det_state)
+
+    def _compose_display_frame(
+            self, warped_or_raw: Optional[np.ndarray], raw_frame: np.ndarray
+    ) -> Optional[np.ndarray]:
+        display_frame = warped_or_raw if warped_or_raw is not None else raw_frame
+        if (
+                display_frame is not None
+                and self.latest_pieces is not None
+                and self.pipeline.is_calibrated
+        ):
+            display_frame = draw_piece_overlay(
+                display_frame,
+                self.latest_pieces,
+                squares=int(getattr(config, "BOARD_SQUARES", 8)),
+                margin_squares=float(getattr(config, "BOARD_MARGIN_SQUARES", 1.7)),
+                raw_boxes=self.latest_boxes,
+                confidences=self.latest_confs,
+            )
+        return display_frame
+
+    def _handle_gui(self, display_frame: Optional[np.ndarray]) -> bool:
+        """Render the current frame and return True if the user requested exit."""
+        if display_frame is not None:
+            show_image(self.window_name, display_frame)
+        key = wait_key(1)
+        return key == 27  # ESC

@@ -61,48 +61,124 @@ class SingleFrameBaseline:
         if self._ref_occ is None:
             return None
 
-        from_sq: Optional[str] = None
-        to_sq: Optional[str] = None
-        label_changes: int = 0
-        label_sq: Optional[str] = None
+        # Helpers
+        files = "abcdefgh"
 
-        # Iterate keys from reference
+        def file_idx(s: str) -> int:
+            return files.find(s[0]) if s and len(s) == 2 else -1
+
+        def rank_num(s: str) -> int:
+            try:
+                return int(s[1])
+            except Exception:
+                return -1
+
+        def is_diag_step(a: str, b: str) -> bool:
+            return abs(file_idx(a) - file_idx(b)) == 1 and abs(rank_num(a) - rank_num(b)) == 1
+
+        def code_piece_char(code: Optional[str]) -> str:
+            return (code or "  ").lower()[1:2]  # 'p','n','b','r','q','k' or ''
+
+        def code_color_char(code: Optional[str]) -> str:
+            return (code or " ").lower()[0:1]  # 'w' or 'b' or ''
+
+        def is_last_rank_for_color(sq: str, color: str) -> bool:
+            r = rank_num(sq)
+            return (color == 'w' and r == 8) or (color == 'b' and r == 1)
+
+        # Compute diffs
+        cleared: list[str] = []  # occupied -> empty
+        filled: list[str] = []  # empty -> occupied
+        label_change_sqs: list[str] = []  # occupied both, label changed
+
         for sq, was_occ in self._ref_occ.items():
             now_occ = bool(curr_occ.get(sq, False))
-
             if was_occ and not now_occ:
-                if from_sq is None:
-                    from_sq = sq
-                else:
-                    # multiple sources -> ambiguous
-                    return None
+                cleared.append(sq)
             elif not was_occ and now_occ:
-                if to_sq is None:
-                    to_sq = sq
-                else:
-                    # multiple destinations -> ambiguous
-                    return None
+                filled.append(sq)
             else:
-                # Occupancy unchanged; check label change if we track pieces
                 if was_occ and now_occ and self._ref_pieces is not None and curr_pieces is not None:
-                    prev_lbl = self._ref_pieces.get(sq)
-                    curr_lbl = curr_pieces.get(sq)
-                    if (prev_lbl or "").lower() != (curr_lbl or "").lower():
-                        label_changes += 1
-                        label_sq = sq
+                    prev_lbl = (self._ref_pieces.get(sq) or "").lower()
+                    curr_lbl = (curr_pieces.get(sq) or "").lower()
+                    if prev_lbl != curr_lbl:
+                        label_change_sqs.append(sq)
 
-        # Accept simple move (ignore label noise on other squares)
-        # Earlier we required label_changes == 0 which proved too strict in
-        # practice due to occasional reclassification noise while occupancy
-        # remains the same on unrelated squares. We only need occupancy diffs
-        # to identify a quiet move reliably, so accept from+to regardless of
-        # label_changes.
-        if from_sq and to_sq:
-            return f"{from_sq}{to_sq}"
+        # 1) Simple move (quiet): exactly one cleared and one filled
+        if len(cleared) == 1 and len(filled) == 1:
+            from_sq = cleared[0]
+            to_sq = filled[0]
+            uci = f"{from_sq}{to_sq}"
 
-        # Accept capture heuristic: from + one label change
-        if from_sq and not to_sq and label_changes == 1 and label_sq is not None:
-            return f"{from_sq}{label_sq}"
+            # Promotion (quiet promotion)
+            if self._ref_pieces is not None:
+                mover_code = self._ref_pieces.get(from_sq)
+                if code_piece_char(mover_code) == 'p':
+                    color = code_color_char(mover_code)
+                    if is_last_rank_for_color(to_sq, color):
+                        promo = 'q'
+                        if curr_pieces is not None:
+                            pch = code_piece_char(curr_pieces.get(to_sq))
+                            if pch in ('q', 'r', 'b', 'n'):
+                                promo = pch
+                        uci = f"{uci}{promo}"
+            return uci
+
+        # 2) Capture where dest remained occupied: one cleared, one label-changed square
+        if len(cleared) == 1 and len(filled) == 0 and len(label_change_sqs) == 1:
+            from_sq = cleared[0]
+            to_sq = label_change_sqs[0]
+            uci = f"{from_sq}{to_sq}"
+
+            # Promotion with capture (capture-promotion): pawn reaches last rank
+            if self._ref_pieces is not None:
+                mover_code = self._ref_pieces.get(from_sq)
+                if code_piece_char(mover_code) == 'p':
+                    color = code_color_char(mover_code)
+                    if is_last_rank_for_color(to_sq, color):
+                        promo = 'q'
+                        if curr_pieces is not None:
+                            pch = code_piece_char(curr_pieces.get(to_sq))
+                            if pch in ('q', 'r', 'b', 'n'):
+                                promo = pch
+                        uci = f"{uci}{promo}"
+            return uci
+
+        # 3) Castling: two cleared and two filled matching castle patterns
+        if len(cleared) == 2 and len(filled) == 2:
+            cset = set(cleared)
+            fset = set(filled)
+            # White
+            if cset == {"e1", "h1"} and fset == {"g1", "f1"}:
+                return "e1g1"
+            if cset == {"e1", "a1"} and fset == {"c1", "d1"}:
+                return "e1c1"
+            # Black
+            if cset == {"e8", "h8"} and fset == {"g8", "f8"}:
+                return "e8g8"
+            if cset == {"e8", "a8"} and fset == {"c8", "d8"}:
+                return "e8c8"
+
+        # 4) En passant: two cleared (from + captured pawn), one filled (to)
+        if len(cleared) == 2 and len(filled) == 1:
+            to_sq = filled[0]
+
+            # Find which cleared square is the mover (diagonal step to 'to')
+            candidates = [sq for sq in cleared if is_diag_step(sq, to_sq)]
+            if len(candidates) == 1:
+                from_sq = candidates[0]
+                captured_sq = next(s for s in cleared if s != from_sq)
+
+                # Geometric EP check: captured square must be same file as 'to' and same rank as 'from'
+                if file_idx(captured_sq) == file_idx(to_sq) and rank_num(captured_sq) == rank_num(from_sq):
+                    ok = True
+                    if self._ref_pieces is not None:
+                        mover_code = self._ref_pieces.get(from_sq)
+                        captured_code = self._ref_pieces.get(captured_sq)
+                        # Must be pawn capturing pawn
+                        ok = code_piece_char(mover_code) == 'p' and code_piece_char(captured_code) == 'p'
+                    if ok:
+                        return f"{from_sq}{to_sq}"
 
         return None
 

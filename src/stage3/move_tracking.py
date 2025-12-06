@@ -145,6 +145,11 @@ class MoveTracker:
 
         self._pending_candidates: Optional[List[chess.Move]] = None
         self._pending_frames: int = 0
+        # Allow brief gaps where candidates temporarily disappear without
+        # immediately clearing pending state. This helps recall when the
+        # detector or filter flickers for a frame.
+        self._pending_grace_misses: int = 0
+        self._max_grace_misses: int = 1
 
         self._waiting_for_start: bool = True
         self._initialized: bool = False
@@ -348,11 +353,27 @@ class MoveTracker:
         Confirmation logic with hysteresis over multiple frames.
         """
         if not candidates:
+            # One-frame grace period: keep pending set if it existed, to avoid
+            # losing progress on transient drops.
+            if self._pending_candidates is not None and self._pending_grace_misses < self._max_grace_misses:
+                self._pending_grace_misses += 1
+                if self._debug:
+                    _log.debug(
+                        "[MoveTracker] candidates empty, using grace miss %d/%d (keeping pending)",
+                        self._pending_grace_misses,
+                        self._max_grace_misses,
+                    )
+                return None
+
             if self._debug and self._pending_candidates:
                 _log.debug("[MoveTracker] candidates dropped, clearing pending state")
             self._pending_candidates = None
             self._pending_frames = 0
+            self._pending_grace_misses = 0
             return None
+
+        # We have candidates this frame – reset grace misses counter
+        self._pending_grace_misses = 0
 
         new_set = frozenset(m.uci() for m in candidates)
         old_set = (
@@ -432,6 +453,7 @@ class MoveTracker:
             self.filter.reset()
             self._pending_candidates = None
             self._pending_frames = 0
+            self._pending_grace_misses = 0
 
             self.board = chess.Board()
             self._debug_print_board("initial")
@@ -499,6 +521,7 @@ class MoveTracker:
         # Clear tracking state
         self._pending_candidates = None
         self._pending_frames = 0
+        self._pending_grace_misses = 0
         self._frame_index = 0
         self._last_occ_for_debug = None
         self._last_pieces_for_debug = None
@@ -522,6 +545,11 @@ class MoveTracker:
         prev_occ, curr_occ = self.filter.update_from_detections(detections)
 
         if self._handle_start_detection(curr_occ):
+            # While waiting for initial position (or just after locking it),
+            # cache the latest observed occupancy so that downstream logic
+            # has a valid previous frame once tracking starts.
+            self._last_occ_for_debug = dict(curr_occ)
+            self._last_pieces_for_debug = None
             return None
 
         if prev_occ == curr_occ and not self._pending_candidates:
@@ -568,6 +596,9 @@ class MoveTracker:
         prev_occ, curr_occ = self.filter.update_from_occupancy(occupancy)
 
         if self._handle_start_detection(curr_occ):
+            # Cache current occupancy while waiting; no labels available here.
+            self._last_occ_for_debug = dict(curr_occ)
+            self._last_pieces_for_debug = None
             return None
 
         if prev_occ == curr_occ and not self._pending_candidates:
@@ -636,6 +667,10 @@ class MoveTracker:
                 _log.debug("[MoveTracker] filtered occupancy unchanged")
 
         if self._handle_start_detection(curr_occ):
+            # While waiting for start, cache current filtered state so that
+            # label-change disambiguation has a valid previous frame post-init.
+            self._last_occ_for_debug = dict(curr_occ)
+            self._last_pieces_for_debug = dict(pieces)
             return None
 
         if prev_occ == curr_occ and not self._pending_candidates:
@@ -649,6 +684,38 @@ class MoveTracker:
             return None
 
         candidates = self._candidate_moves_for_target_occupancy(curr_occ)
+
+        if len(candidates) > 1:
+            # First, try to leverage label-change information like the
+            # single-frame baseline does: when a capture happens, the
+            # destination square typically stays occupied but its label
+            # changes from the captured piece to the moving piece. This
+            # gives a strong hint which destination square to choose.
+
+            # Compute which squares were occupied in both frames but changed label
+            label_change_sqs: List[str] = []
+            if self._last_pieces_for_debug is not None and pieces is not None:
+                for sq in (chess.square_name(s) for s in chess.SQUARES):
+                    if curr_occ.get(sq, False) and prev_occ.get(sq, False):
+                        prev_lbl = (self._last_pieces_for_debug.get(sq) or "").lower()
+                        curr_lbl = (pieces.get(sq) or "").lower()
+                        if prev_lbl != curr_lbl:
+                            label_change_sqs.append(sq)
+
+            if label_change_sqs:
+                # Restrict to candidates capturing to one of the label-changed squares
+                lc_set = set(label_change_sqs)
+                restricted: List[chess.Move] = [
+                    m for m in candidates if chess.square_name(m.to_square) in lc_set
+                ]
+                if restricted:
+                    if self._debug:
+                        _log.debug(
+                            "[MoveTracker] label-change filter reduced candidates from %d to %d",
+                            len(candidates),
+                            len(restricted),
+                        )
+                    candidates = restricted
 
         if len(candidates) > 1:
             # Use move-local label evidence to disambiguate.

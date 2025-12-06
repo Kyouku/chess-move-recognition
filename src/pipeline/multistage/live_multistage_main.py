@@ -19,15 +19,18 @@ _log = get_logger(__name__)
 
 
 def _append_move_log(info: MoveInfo) -> None:
-    """Append a single move to the CSV-like log file. Errors are non-fatal."""
+    """Append a single move to the CSV-like log file as uci;san;fen. Errors are non-fatal."""
     try:
         # Ensure directory exists
         try:
             config.MOVES_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
+        uci = getattr(info.move, "uci", lambda: "")()
+        san = getattr(info, "san", None) or ""
+        fen_after = getattr(info, "fen_after", None) or ""
         with open(config.MOVES_LOG_PATH, "a", encoding="utf8") as f:
-            f.write(f"{info.move.uci()};{info.san};{info.fen_after}\n")
+            f.write(f"{uci};{san};{fen_after}\n")
     except OSError as e:
         _log.warning(
             "Could not append move to log file %s: %s",
