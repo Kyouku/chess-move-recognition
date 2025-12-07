@@ -291,36 +291,51 @@ def move_detection_delays(
         gt: GroundTruth,
 ) -> List[int]:
     """
-    For each ground truth ply that has both a frame annotation and a
-    matching predicted move, compute
+    For each ground truth ply that
 
-      delay = frame_predicted - frame_ground_truth
+      - has a frame annotation,
+      - has a corresponding predicted move at the same index, and
+      - that predicted move matches the ground truth UCI,
 
-    Returns a list of integer delays in frames.
+    compute
+
+        delay = frame_predicted - frame_ground_truth
+
+    Returns a list of non-negative integer delays in frames.
     """
     if not gt.frame_for_ply:
         return []
 
     delays: List[int] = []
-    pred_cursor = -1
 
-    for ply_idx in sorted(gt.frame_for_ply.keys()):
-        gt_frame = gt.frame_for_ply[ply_idx]
+    for ply_idx, gt_frame in sorted(gt.frame_for_ply.items()):
+        # Check valid ply
         if ply_idx <= 0 or ply_idx > len(gt.moves_uci):
             continue
+
         gt_move = gt.moves_uci[ply_idx - 1]
 
-        # Find the next occurrence of this move at or after pred_cursor + 1
-        try:
-            pos = pred_moves.index(gt_move, pred_cursor + 1)
-        except ValueError:
+        # There must be a predicted move at this ply position
+        if ply_idx - 1 >= len(pred_moves):
             continue
 
-        if pos < 0 or pos >= len(pred_move_frames):
+        pred_move = pred_moves[ply_idx - 1]
+
+        # Only consider moves that are correct at the correct index
+        if pred_move != gt_move:
             continue
 
-        pred_frame = pred_move_frames[pos]
-        delays.append(int(pred_frame) - int(gt_frame))
-        pred_cursor = pos
+        # There must be a frame index for this predicted move
+        if ply_idx - 1 >= len(pred_move_frames):
+            continue
+
+        pred_frame = int(pred_move_frames[ply_idx - 1])
+        gt_frame = int(gt_frame)
+
+        # Skip clearly inconsistent negative delays
+        if pred_frame < gt_frame:
+            continue
+
+        delays.append(pred_frame - gt_frame)
 
     return delays

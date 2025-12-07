@@ -58,7 +58,7 @@ BOARD_MARGIN_SQUARES: float = 1.7
 
 # If True, use VIDEO_PATH as input, otherwise use CAMERA_INDEX.
 USE_VIDEO_FILE: bool = True
-VIDEO_PATH: Path = VIDEOS_DIR / "game2.mp4"
+VIDEO_PATH: Path = VIDEOS_DIR / "game1.mp4"
 
 # ---------------------------------------------------------------------------
 # Calibration settings
@@ -134,4 +134,4 @@ MOVE_OUT_QUEUE_SIZE: int = 64
 
 # "multistage" for full temporal tracker
 # "singleframe" for FEN only baseline
-PIPELINE_MODE: str = "multistage"
+PIPELINE_MODE: str = "singleframe"
