@@ -25,10 +25,14 @@ from src.pipeline.comparison.metrics import (
     GroundTruth,
     fen_interval_accuracy,
     fen_interval_counts,
+    fen_game_precision_recall_f1,
+    fen_game_iou,
     load_ground_truth,
     move_accuracy_counts,
     move_detection_delays,
     move_reconstruction_rate,
+    move_coverage_counts,
+    move_coverage,
 )
 from src.pipeline.comparison.multistage_offline import run_multistage
 from src.pipeline.fen_utils import placement_from_fen
@@ -143,7 +147,7 @@ def _report_for_pipeline(name: str, result: PipelineResult, gt: GroundTruth) -> 
     """
     Log metrics for a single pipeline result against the provided ground truth.
 
-    Pure reporting: does not mutate inputs or global state.
+    Pure reporting. This function does not mutate inputs or global state.
     """
     # FEN accuracy based on intervals between annotated plies
     correct_f, total_f = fen_interval_counts(result.frame_fens, gt)
@@ -156,7 +160,20 @@ def _report_for_pipeline(name: str, result: PipelineResult, gt: GroundTruth) -> 
         total_f,
     )
 
-    # Only pipelines that emit moves are evaluated with MRR and delays
+    # Whole game board level piece placement metrics
+    prec, rec, f1 = fen_game_precision_recall_f1(result.frame_fens, gt)
+    iou = fen_game_iou(result.frame_fens, gt)
+    _log.info(
+        "[%s] Whole game piece placement: "
+        "precision = %.3f, recall = %.3f, F1 = %.3f, IoU = %.3f",
+        name,
+        prec,
+        rec,
+        f1,
+        iou,
+    )
+
+    # Only pipelines that emit moves are evaluated with move based metrics
     if result.moves_uci:
         correct_m, total_m = move_accuracy_counts(result.moves_uci, gt.moves_uci)
         mrr = move_reconstruction_rate(result.moves_uci, gt.moves_uci)
@@ -166,6 +183,16 @@ def _report_for_pipeline(name: str, result: PipelineResult, gt: GroundTruth) -> 
             mrr,
             correct_m,
             total_m,
+        )
+
+        emitted, total_gt = move_coverage_counts(result.moves_uci, gt.moves_uci)
+        coverage = move_coverage(result.moves_uci, gt.moves_uci)
+        _log.info(
+            "[%s] Move coverage = %.3f (%d/%d)",
+            name,
+            coverage,
+            emitted,
+            total_gt,
         )
 
         if gt.frame_for_ply:
@@ -179,7 +206,7 @@ def _report_for_pipeline(name: str, result: PipelineResult, gt: GroundTruth) -> 
                 )
     else:
         _log.info(
-            "[%s] no moves emitted by this pipeline, MRR and delays are not applicable",
+            "[%s] no moves emitted by this pipeline, move metrics are not applicable",
             name,
         )
 

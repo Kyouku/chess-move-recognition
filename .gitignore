@@ -50,7 +50,8 @@ data/saved_h_cache/
 data/labels/
 data/tmp/
 datasets/
-models/*
+models/comparison_results
+!models/*
 !models/scripts/
 !models/scripts/**
 runs/
