@@ -74,7 +74,8 @@ training/yolo11_runs/*
 
 # Live run artifacts (game detections and detected moves)
 data/detected_moves/
-data/detections/
+!data/detections
+!data/detections/*
 
 # ============================
 # VIDEO AND IMAGE CAPTURE
