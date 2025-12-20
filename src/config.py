@@ -19,27 +19,6 @@ VIDEOS_DIR: Path = DATA_DIR / "videos"
 CALIBRATION_DIR: Path = DATA_DIR / "saved_h_cache"
 GAME_MOVES_DIR: Path = DATA_DIR / "detected_moves"
 
-
-# Automatically create important directories if they don't exist.
-def _ensure_core_directories() -> None:
-    to_create = [
-        MODELS_DIR,
-        DATA_DIR,
-        VIDEOS_DIR,
-        CALIBRATION_DIR,
-        GAME_MOVES_DIR,
-    ]
-    for p in to_create:
-        try:
-            p.mkdir(parents=True, exist_ok=True)
-        except OSError:
-            # Directory creation is best-effort; proceed even if it fails.
-            pass
-
-
-# Run on import so that using config guarantees directories exist.
-_ensure_core_directories()
-
 # ---------------------------------------------------------------------------
 # Input source
 # ---------------------------------------------------------------------------
@@ -79,7 +58,7 @@ BOARD_MARGIN_SQUARES: float = 1.7
 
 # If True, use VIDEO_PATH as input, otherwise use CAMERA_INDEX.
 USE_VIDEO_FILE: bool = True
-VIDEO_PATH: Path = VIDEOS_DIR / "game3.mp4"
+VIDEO_PATH: Path = VIDEOS_DIR / "game1.mp4"
 
 # ---------------------------------------------------------------------------
 # Calibration settings
@@ -155,4 +134,4 @@ MOVE_OUT_QUEUE_SIZE: int = 64
 
 # "multistage" for full temporal tracker
 # "singleframe" for FEN only baseline
-PIPELINE_MODE: str = "multistage"
+PIPELINE_MODE: str = "singleframe"
