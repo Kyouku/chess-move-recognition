@@ -40,6 +40,11 @@ class PipelineResult:
     moves_san: List[str]
     move_frames: List[int]
 
+    @property
+    def fens(self) -> List[str]:
+        """Backwards compatible alias for frame_fens."""
+        return self.frame_fens
+
 
 # -------------------------------------------------------------
 # Shared helpers for offline comparison utilities only
@@ -63,7 +68,6 @@ def compute_sampling_step(
         step = max(1, int(round(ratio)))
         return step
     except Exception:
-        # Be robust against any bad inputs
         return 1
 
 
@@ -92,13 +96,9 @@ def iter_time_based_should_process(
     that approximates a live system with a detector that needs
     1 / detector_fps seconds per processed frame and a queue size of 1.
 
-    This helper is used only in the offline comparison pipeline to simulate
-    live timing when iterating over recorded frames.
-
     If parameters are missing or invalid or detector_fps >= video_fps, the
     iterator yields should_process=True for all frames (process every frame).
     """
-    # Validate parameters
     try:
         vf = float(video_fps) if video_fps is not None else None
         df = float(detector_fps) if detector_fps is not None else None
@@ -118,7 +118,6 @@ def iter_time_based_should_process(
             yield idx, True
         return
 
-    # Time based gating
     dt_video = 1.0 / vf  # type: ignore[arg-type]
     dt_det = 1.0 / df  # type: ignore[arg-type]
     next_free_time = 0.0

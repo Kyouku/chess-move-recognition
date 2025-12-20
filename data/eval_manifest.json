@@ -1,0 +1,34 @@
+{
+  "games": [
+    {
+      "name": "game1",
+      "video": "data/videos/game1.mp4",
+      "detections": "data/detections/game1_detections.pkl",
+      "gt": "data/gt/game1.json"
+    },
+    {
+      "name": "game2",
+      "video": "data/videos/game2.mp4",
+      "detections": "data/detections/game2_detections.pkl",
+      "gt": "data/gt/game2.json"
+    },
+    {
+      "name": "game3",
+      "video": "data/videos/game3.mp4",
+      "detections": "data/detections/game3_detections.pkl",
+      "gt": "data/gt/game3.json"
+    },
+    {
+      "name": "game4",
+      "video": "data/videos/game4.mp4",
+      "detections": "data/detections/game4_detections.pkl",
+      "gt": "data/gt/game4.json"
+    },
+    {
+      "name": "game5",
+      "video": "data/videos/game5.mp4",
+      "detections": "data/detections/game5_detections.pkl",
+      "gt": "data/gt/game5.json"
+    }
+  ]
+}

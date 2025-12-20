@@ -6,6 +6,13 @@ Offline comparison between the single frame baseline and the multistage pipeline
 Takes a recorded detection log, runs both pipelines on the same DetectionState
 sequence, and reports FEN based and move based metrics against an optional
 ground truth file.
+
+Example usage:
+
+    python -m src.pipeline.comparison.compare_pipelines \
+      --video data/videos/game1.mp4 \
+      --detections data/detections/game1.pkl \
+      --gt data/gt/game1.json
 """
 
 import argparse
@@ -38,15 +45,6 @@ from src.pipeline.comparison.multistage_offline import run_multistage
 from src.pipeline.fen_utils import placement_from_fen
 
 _log = get_logger(__name__)
-
-"""
-Example usage:
-
-python -m src.pipeline.comparison.compare_pipelines \
-  --video data/videos/game1.mp4 \
-  --detections data/detections/game1.pkl \
-  --gt data/gt/game1.json
-"""
 
 
 def _log_moves_with_fens(name: str, result: PipelineResult) -> None:

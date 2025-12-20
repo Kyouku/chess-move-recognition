@@ -69,8 +69,8 @@ results/
 *.yaml        # config exports (keep only templates you need)
 
 # Project specific training artifacts
-training/yolo11_runs
-training/yolo11_runs/*
+models/yolo11_runs
+models/yolo11_runs/*
 
 # Live run artifacts (game detections and detected moves)
 data/detected_moves/

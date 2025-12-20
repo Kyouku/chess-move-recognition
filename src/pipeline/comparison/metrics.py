@@ -60,7 +60,6 @@ def load_ground_truth(path: str | Path) -> GroundTruth:
     Load ground truth from a JSON file.
 
     Expected format:
-
       {
         "pgn": "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6",
         "frame_for_ply": {
@@ -70,7 +69,7 @@ def load_ground_truth(path: str | Path) -> GroundTruth:
         }
       }
 
-    The frame map is optional and can be empty.
+    frame_for_ply is optional and may be empty.
     """
     path = Path(path)
     data = json.loads(path.read_text(encoding="utf8"))
@@ -100,13 +99,9 @@ def load_ground_truth(path: str | Path) -> GroundTruth:
 # -------------------------------------------------------------
 
 
-def fen_frame_counts(
-        frame_fens: List[str],
-        gt: GroundTruth,
-) -> Tuple[int, int]:
+def fen_frame_counts(frame_fens: List[str], gt: GroundTruth) -> Tuple[int, int]:
     """
-    Count how many annotated frames have a correct FEN placement at the
-    exact ground truth annotation frame.
+    Compare predicted vs GT placement at the exact annotated frame for each ply.
 
     Returns (correct, total).
     """
@@ -135,57 +130,33 @@ def fen_frame_counts(
     return correct, total
 
 
-def fen_frame_accuracy(
-        frame_fens: List[str],
-        gt: GroundTruth,
-) -> float:
-    """
-    Strict FEN based accuracy at annotated frames.
-
-    For each ground truth ply that has a frame annotation, compare the
-    placement portion of
-
-      - the predicted FEN at that frame index, and
-      - the ground truth FEN after that ply.
-
-    The result is the fraction of annotated plies where the placement strings
-    are identical.
-    """
+def fen_frame_accuracy(frame_fens: List[str], gt: GroundTruth) -> float:
     correct, total = fen_frame_counts(frame_fens, gt)
     if total == 0:
         return 0.0
     return correct / float(total)
 
 
-def fen_interval_counts(
-        frame_fens: List[str],
-        gt: GroundTruth,
-) -> Tuple[int, int]:
+def fen_at_ply_accuracy(frame_fens: List[str], gt: GroundTruth) -> float:
+    """Alias for fen_frame_accuracy used by comparison scripts."""
+    return fen_frame_accuracy(frame_fens, gt)
+
+
+def fen_interval_counts(frame_fens: List[str], gt: GroundTruth) -> Tuple[int, int]:
     """
     Interval based FEN accuracy.
 
-    For each ground truth ply k that has a frame annotation, consider the
-    interval
+    For each annotated ply k with frame_for_ply[k] = start,
+    define end as (frame_for_ply[next_k] - 1) or last frame.
 
-      [frame_for_ply[k], frame_for_ply[k_next] - 1]
-
-    where k_next is the next ply with an annotation. For the last annotated
-    ply, the interval extends to the end of the video.
-
-    Count a ply as correct if the target placement (ground truth FEN after
-    that ply) appears at least once in this interval in the predicted FEN
-    sequence.
-
-    Returns (correct, total).
+    A ply counts as correct if the GT placement appears at least once
+    anywhere in [start, end] in the predicted frame_fens.
     """
-    if not gt.frame_for_ply:
-        return 0, 0
-
-    if not frame_fens:
+    if not gt.frame_for_ply or not frame_fens:
         return 0, 0
 
     last_frame_idx = len(frame_fens) - 1
-    items = sorted(gt.frame_for_ply.items())  # list of (ply_idx, start_frame)
+    items = sorted(gt.frame_for_ply.items())
 
     correct = 0
     total = 0
@@ -209,24 +180,14 @@ def fen_interval_counts(
         total += 1
 
         for f_idx in range(start_frame, end_frame + 1):
-            pred_placement = placement_from_fen(frame_fens[f_idx])
-            if pred_placement == target_placement:
+            if placement_from_fen(frame_fens[f_idx]) == target_placement:
                 correct += 1
                 break
 
     return correct, total
 
 
-def fen_interval_accuracy(
-        frame_fens: List[str],
-        gt: GroundTruth,
-) -> float:
-    """
-    Fraction of plies where the correct FEN placement is seen at least once
-    in the ground truth interval for that ply.
-
-    This metric is robust to delayed confirmations in multistage pipelines.
-    """
+def fen_interval_accuracy(frame_fens: List[str], gt: GroundTruth) -> float:
     correct, total = fen_interval_counts(frame_fens, gt)
     if total == 0:
         return 0.0
@@ -234,26 +195,159 @@ def fen_interval_accuracy(
 
 
 # -------------------------------------------------------------
-# Whole game board level metrics
+# Move metrics
 # -------------------------------------------------------------
 
+
+def move_accuracy_counts(pred_moves: List[str], gt_moves: List[str]) -> Tuple[int, int]:
+    if not gt_moves:
+        return 0, 0
+    correct = 0
+    for i, gt_move in enumerate(gt_moves):
+        if i < len(pred_moves) and pred_moves[i] == gt_move:
+            correct += 1
+    return correct, len(gt_moves)
+
+
+def move_reconstruction_rate(pred_moves: List[str], gt_moves: List[str]) -> float:
+    """
+    In this project, "MRR" is used as ply-aligned move reconstruction accuracy.
+    """
+    correct, total = move_accuracy_counts(pred_moves, gt_moves)
+    if total == 0:
+        return 0.0
+    return correct / float(total)
+
+
+def move_coverage(pred_moves: List[str], gt_moves: List[str]) -> float:
+    """
+    coverage = min(len(pred), len(gt)) / len(gt)
+    """
+    if not gt_moves:
+        return 0.0
+    return min(len(pred_moves), len(gt_moves)) / float(len(gt_moves))
+
+
+def move_detection_delays(*args):
+    """
+    Compatibility helper.
+
+    Supported calls:
+      A) move_detection_delays(pred_moves, pred_move_frames, gt) -> list[int] (delays in frames)
+      B) move_detection_delays(gt_moves, gt_frames_by_ply, pred_moves, pred_frames, video_fps) -> list[float] (seconds)
+
+    For B), gt_frames_by_ply can be:
+      - a list[int] aligned to plies (0-based), or
+      - a dict[int,int] frame_for_ply (1-based ply index).
+    """
+    if len(args) == 3:
+        pred_moves, pred_move_frames, gt = args
+        if not isinstance(gt, GroundTruth):
+            raise TypeError("Third argument must be GroundTruth for 3-arg move_detection_delays")
+
+        if not gt.frame_for_ply:
+            return []
+
+        delays: List[int] = []
+        for ply_idx, gt_frame in sorted(gt.frame_for_ply.items()):
+            if ply_idx <= 0 or ply_idx > len(gt.moves_uci):
+                continue
+            if ply_idx - 1 >= len(pred_moves):
+                continue
+            if ply_idx - 1 >= len(pred_move_frames):
+                continue
+
+            gt_move = gt.moves_uci[ply_idx - 1]
+            pred_move = pred_moves[ply_idx - 1]
+            if pred_move != gt_move:
+                continue
+
+            pred_frame = int(pred_move_frames[ply_idx - 1])
+            gt_frame_i = int(gt_frame)
+            if pred_frame < gt_frame_i:
+                continue
+            delays.append(pred_frame - gt_frame_i)
+
+        return delays
+
+    if len(args) == 5:
+        gt_moves, gt_frames_by_ply, pred_moves, pred_frames, video_fps = args
+        fps = float(video_fps) if video_fps and float(video_fps) > 0 else None
+        if fps is None:
+            return []
+
+        # normalize gt frame lookup for 0-based index
+        def gt_frame_for_index(i0: int) -> int | None:
+            if isinstance(gt_frames_by_ply, dict):
+                return gt_frames_by_ply.get(i0 + 1)
+            if isinstance(gt_frames_by_ply, list):
+                if 0 <= i0 < len(gt_frames_by_ply):
+                    return int(gt_frames_by_ply[i0])
+                return None
+            return None
+
+        delays_s: List[float] = []
+        for i0 in range(min(len(gt_moves), len(pred_moves), len(pred_frames))):
+            if pred_moves[i0] != gt_moves[i0]:
+                continue
+            gf = gt_frame_for_index(i0)
+            if gf is None:
+                continue
+            pf = int(pred_frames[i0])
+            if pf < int(gf):
+                continue
+            delays_s.append((pf - int(gf)) / fps)
+
+        return delays_s
+
+    raise TypeError("Unsupported move_detection_delays signature")
+
+
+def mean_move_delay_seconds(
+        pred_moves: List[str],
+        pred_move_frames: List[int],
+        gt: GroundTruth,
+        video_fps: float | None,
+) -> Tuple[float | None, float | None, int]:
+    """
+    Returns (mean_delay_s, median_delay_s, count) for correct, ply-aligned moves
+    at annotated plies. If no delays, returns (None, None, 0).
+    """
+    delays_frames = move_detection_delays(pred_moves, pred_move_frames, gt)
+    if not delays_frames:
+        return None, None, 0
+
+    if video_fps is None or float(video_fps) <= 0:
+        return None, None, len(delays_frames)
+
+    fps = float(video_fps)
+    delays_s = sorted([float(d) / fps for d in delays_frames])
+    n = len(delays_s)
+    mean_s = sum(delays_s) / float(n)
+
+    if n % 2 == 1:
+        median_s = delays_s[n // 2]
+    else:
+        median_s = 0.5 * (delays_s[n // 2 - 1] + delays_s[n // 2])
+
+    return mean_s, median_s, n
+
+
+# -------------------------------------------------------------
+# Whole game board level metrics (piece placement)
+# -------------------------------------------------------------
 
 # Piece symbols used in FEN placements. Everything else is treated as empty.
 _PIECE_CHARS = set("prnbqkPRNBQK")
 
 
 def _is_piece_symbol(sym: str | None) -> bool:
-    """
-    Return True if sym looks like a piece symbol from a FEN placement,
-    False for empty or missing squares.
-    """
     return isinstance(sym, str) and sym in _PIECE_CHARS
 
 
 def _fen_to_square_map_safe(fen: str) -> Dict[str, str | None] | None:
     """
     Convert a full FEN string into a mapping {square_name: piece_symbol_or_None}.
-
     Returns None if the FEN cannot be parsed.
     """
     try:
@@ -269,31 +363,17 @@ def _fen_to_square_map_safe(fen: str) -> Dict[str, str | None] | None:
     return mapping
 
 
-def fen_game_counts(
-        frame_fens: List[str],
-        gt: GroundTruth,
-) -> Tuple[int, int, int]:
+def fen_game_counts(frame_fens: List[str], gt: GroundTruth) -> Tuple[int, int, int]:
     """
-    Count true positives, false positives, and false negatives at the level of
-    single pieces on squares, aggregated over the whole game.
+    Count TP/FP/FN for piece placement over the whole game, restricted to
+    annotated ply intervals defined by gt.frame_for_ply.
 
-    Evaluation is restricted to frames that lie inside the ground truth
-    intervals defined by gt.frame_for_ply, similar to fen_interval_counts:
-
-      - For each annotated ply k, we take the ground truth FEN after ply k.
-      - For all frames in the interval assigned to this ply, we compare the
-        predicted FEN to this ground truth FEN.
-      - At each square, we compare occupancy and piece identity.
-
-    Counting rules (per square):
-
+    Counting per square:
       GT empty, pred empty         -> ignored
       GT piece X, pred piece X     -> TP
       GT empty, pred piece Y       -> FP
       GT piece X, pred empty       -> FN
       GT piece X, pred piece Y!=X  -> FP + FN
-
-    Returns (tp, fp, fn).
     """
     if not gt.frame_for_ply:
         return 0, 0, 0
@@ -301,11 +381,9 @@ def fen_game_counts(
         return 0, 0, 0
 
     last_frame_idx = len(frame_fens) - 1
-    items = sorted(gt.frame_for_ply.items())  # list of (ply_idx, start_frame)
+    items = sorted(gt.frame_for_ply.items())  # (ply_idx, start_frame)
 
-    tp = 0
-    fp = 0
-    fn = 0
+    tp = fp = fn = 0
 
     for i, (ply_idx, start_frame) in enumerate(items):
         if ply_idx <= 0 or ply_idx > len(gt.fens_after_ply):
@@ -349,204 +427,32 @@ def fen_game_counts(
                 elif has_gt and has_pred and pred_piece != gt_piece:
                     fp += 1
                     fn += 1
-                # both empty -> ignore
 
     return tp, fp, fn
 
 
-def fen_game_precision_recall_f1(
-        frame_fens: List[str],
-        gt: GroundTruth,
-) -> Tuple[float, float, float]:
-    """
-    Whole game piece placement precision, recall, and F1.
-
-    These are micro averaged over all frames and squares inside the annotated
-    ground truth intervals.
-    """
+def fen_game_precision_recall_f1(frame_fens: List[str], gt: GroundTruth) -> Tuple[float, float, float]:
     tp, fp, fn = fen_game_counts(frame_fens, gt)
 
-    if tp + fp > 0:
-        precision = tp / float(tp + fp)
-    else:
-        precision = 0.0
-
-    if tp + fn > 0:
-        recall = tp / float(tp + fn)
-    else:
-        recall = 0.0
-
-    if precision + recall > 0.0:
-        f1 = 2.0 * precision * recall / (precision + recall)
-    else:
-        f1 = 0.0
-
+    precision = tp / float(tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / float(tp + fn) if (tp + fn) > 0 else 0.0
+    f1 = (2.0 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
     return precision, recall, f1
 
 
-def fen_game_iou(
-        frame_fens: List[str],
-        gt: GroundTruth,
-) -> float:
-    """
-    Whole game Intersection over Union for piece placements.
-
-    This uses the same TP, FP, FN as fen_game_precision_recall_f1:
-
-      IoU = TP / (TP + FP + FN)
-
-    Values are aggregated over all annotated intervals.
-    """
+def fen_game_iou(frame_fens: List[str], gt: GroundTruth) -> float:
     tp, fp, fn = fen_game_counts(frame_fens, gt)
     denom = tp + fp + fn
-    if denom == 0:
-        return 0.0
-    return tp / float(denom)
+    return tp / float(denom) if denom > 0 else 0.0
 
 
 # -------------------------------------------------------------
-# Move based metrics
+# Move coverage counts (needed by compare_pipelines.py)
 # -------------------------------------------------------------
 
-
-def move_accuracy_counts(
-        pred_moves: List[str],
-        gt_moves: List[str],
-) -> Tuple[int, int]:
+def move_coverage_counts(pred_moves: List[str], gt_moves: List[str]) -> Tuple[int, int]:
     """
-    Exact move accuracy at the sequence level.
-
-    Returns (correct, total) where total is the number of ground truth plies.
+    emitted = number of predicted moves
+    total_gt = number of ground truth moves
     """
-    if not gt_moves:
-        return 0, 0
-
-    correct = 0
-    for i, gt_move in enumerate(gt_moves):
-        if i < len(pred_moves) and pred_moves[i] == gt_move:
-            correct += 1
-    return correct, len(gt_moves)
-
-
-def move_accuracy(pred_moves: List[str], gt_moves: List[str]) -> float:
-    """
-    Exact move accuracy at the sequence level.
-
-    Counts how many ground truth plies are predicted correctly at the
-    correct position.
-    """
-    correct, total = move_accuracy_counts(pred_moves, gt_moves)
-    if total == 0:
-        return 0.0
-    return correct / float(total)
-
-
-def move_reconstruction_rate(
-        pred_moves: List[str],
-        gt_moves: List[str],
-) -> float:
-    """
-    Move Reconstruction Rate (MRR) as used in the thesis:
-
-      fraction of moves in a game that are reconstructed correctly,
-      counted over the entire sequence.
-
-    This is identical to sequence level move accuracy.
-    """
-    return move_accuracy(pred_moves, gt_moves)
-
-
-def move_detection_delays(
-        pred_moves: List[str],
-        pred_move_frames: List[int],
-        gt: GroundTruth,
-) -> List[int]:
-    """
-    For each ground truth ply that
-
-      - has a frame annotation,
-      - has a corresponding predicted move at the same index, and
-      - that predicted move matches the ground truth UCI,
-
-    compute
-
-        delay = frame_predicted - frame_ground_truth
-
-    Returns a list of non negative integer delays in frames.
-    """
-    if not gt.frame_for_ply:
-        return []
-
-    delays: List[int] = []
-
-    for ply_idx, gt_frame in sorted(gt.frame_for_ply.items()):
-        # Check valid ply
-        if ply_idx <= 0 or ply_idx > len(gt.moves_uci):
-            continue
-
-        gt_move = gt.moves_uci[ply_idx - 1]
-
-        # There must be a predicted move at this ply position
-        if ply_idx - 1 >= len(pred_moves):
-            continue
-
-        pred_move = pred_moves[ply_idx - 1]
-
-        # Only consider moves that are correct at the correct index
-        if pred_move != gt_move:
-            continue
-
-        # There must be a frame index for this predicted move
-        if ply_idx - 1 >= len(pred_move_frames):
-            continue
-
-        pred_frame = int(pred_move_frames[ply_idx - 1])
-        gt_frame = int(gt_frame)
-
-        # Skip clearly inconsistent negative delays
-        if pred_frame < gt_frame:
-            continue
-
-        delays.append(pred_frame - gt_frame)
-
-    return delays
-
-
-# -------------------------------------------------------------
-# Move coverage
-# -------------------------------------------------------------
-
-
-def move_coverage_counts(
-        pred_moves: List[str],
-        gt_moves: List[str],
-) -> Tuple[int, int]:
-    """
-    Counts for move coverage:
-
-      emitted = number of moves emitted by the pipeline
-      total_gt = number of ground truth moves
-    """
-    emitted = len(pred_moves)
-    total_gt = len(gt_moves)
-    return emitted, total_gt
-
-
-def move_coverage(
-        pred_moves: List[str],
-        gt_moves: List[str],
-) -> float:
-    """
-    Move coverage for a single game.
-
-      coverage = min(number of moves emitted, number of ground truth moves)
-                 / number of ground truth moves
-
-    This yields 1.0 if the pipeline emits at least as many moves
-    as the ground truth and less than 1.0 if some moves are missing.
-    """
-    emitted, total_gt = move_coverage_counts(pred_moves, gt_moves)
-    if total_gt == 0:
-        return 0.0
-    covered = min(emitted, total_gt)
-    return covered / float(total_gt)
+    return len(pred_moves), len(gt_moves)
