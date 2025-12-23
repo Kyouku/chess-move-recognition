@@ -39,32 +39,30 @@ class MultiStagePipeline(BaseLivePipeline):
             board_size_px: Optional[int] = None,
     ) -> None:
         if board_size_px is None:
-            board_size_px = int(getattr(config, "BOARD_SIZE_PX", 640))
+            board_size_px = config.BOARD_SIZE_PX
 
         super().__init__(
             source=source,
             width=width,
             height=height,
             board_size_px=board_size_px,
-            window_name=getattr(config, "DISPLAY_WINDOW_NAME", "Live"),
+            window_name=config.DISPLAY_WINDOW_NAME,
         )
 
         # Stage 3: MoveTracker with temporal filter and its own worker
         self.move_tracker = MoveTracker(
-            alpha=float(getattr(config, "MOVE_FILTER_ALPHA", 0.6)),
-            occ_threshold=float(getattr(config, "MOVE_FILTER_THRESHOLD", 0.6)),
-            min_confirm_frames=int(
-                getattr(config, "MOVE_MIN_CONFIRM_FRAMES", 2),
-            ),
-            debug=bool(getattr(config, "MOVE_DEBUG", False)),
+            alpha=config.MOVE_FILTER_ALPHA,
+            occ_threshold=config.MOVE_FILTER_THRESHOLD,
+            min_confirm_frames=config.MOVE_MIN_CONFIRM_FRAMES,
+            debug=config.MOVE_DEBUG,
         )
 
         # Queues between Stage 2 and Stage 3
         self.move_in_queue: "queue.Queue[Tuple[Dict[str, bool], Dict[str, Optional[str]]]]" = (
-            queue.Queue(maxsize=int(getattr(config, "MOVE_IN_QUEUE_SIZE", 8)))
+            queue.Queue(maxsize=config.MOVE_IN_QUEUE_SIZE)
         )
         self.move_out_queue: "queue.Queue[MoveInfo]" = queue.Queue(
-            maxsize=int(getattr(config, "MOVE_OUT_QUEUE_SIZE", 16)),
+            maxsize=config.MOVE_OUT_QUEUE_SIZE,
         )
 
         self.move_worker = MoveTrackerWorker(
@@ -210,9 +208,9 @@ def run_live(
     Convenience function to start the live multi stage pipeline.
     """
     if width is None:
-        width = int(getattr(config, "FRAME_WIDTH", 1280))
+        width = config.FRAME_WIDTH
     if height is None:
-        height = int(getattr(config, "FRAME_HEIGHT", 720))
+        height = config.FRAME_HEIGHT
 
     pipeline = MultiStagePipeline(
         source=source,

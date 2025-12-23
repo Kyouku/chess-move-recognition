@@ -8,7 +8,6 @@ based on configuration or function arguments, and starts the selected
 pipeline with a configured capture source.
 """
 
-import logging
 from typing import Optional
 
 from src import config
@@ -24,9 +23,7 @@ def _default_frame_size() -> tuple[int, int]:
     """
     Resolve default frame size from config.
     """
-    width = int(getattr(config, "FRAME_WIDTH", 1280))
-    height = int(getattr(config, "FRAME_HEIGHT", 720))
-    return width, height
+    return config.FRAME_WIDTH, config.FRAME_HEIGHT
 
 
 def create_pipeline(
@@ -53,7 +50,7 @@ def create_pipeline(
       - requested capture size, used as hints for the backend
     """
     if mode is None:
-        mode = getattr(config, "PIPELINE_MODE", "multistage")
+        mode = config.PIPELINE_MODE
 
     mode_norm = (mode or "").strip().lower()
 
@@ -68,7 +65,7 @@ def create_pipeline(
             height = default_h
 
     if mode_norm in ("multistage", "multi", "tracking"):
-        board_size_px = int(getattr(config, "BOARD_SIZE_PX", 640))
+        board_size_px = config.BOARD_SIZE_PX
         _log.info(
             "Creating MultiStagePipeline (mode=%r, source=%r, %dx%d, board=%d)",
             mode_norm,
@@ -110,10 +107,9 @@ def run_from_config() -> None:
       - pick mode from config.PIPELINE_MODE
       - run the selected pipeline
     """
-    log_level = getattr(config, "LOG_LEVEL", logging.DEBUG)
-    set_log_level(log_level)
+    set_log_level(config.LOG_LEVEL)
 
-    mode = getattr(config, "PIPELINE_MODE", "multistage")
+    mode = config.PIPELINE_MODE
     source = get_capture_source()
     width, height = _default_frame_size()
 

@@ -135,7 +135,7 @@ def append_move_log(info: MoveInfo, out_path: Optional[Path] = None) -> None:
       config.MOVES_LOG_PATH.
     - Errors are non fatal and will only be logged as warnings.
     """
-    target = out_path if out_path is not None else getattr(config, "MOVES_LOG_PATH", None)
+    target = out_path if out_path is not None else config.MOVES_LOG_PATH
 
     move_obj = getattr(info, "move", None)
     uci = move_obj.uci() if move_obj is not None else ""
@@ -153,5 +153,5 @@ def append_fen_log(fen: str, out_path: Optional[Path] = None) -> None:
     - If out_path is None, uses config.FEN_LOG_PATH. If that is None, this is a no-op.
     - Ensures parent directory exists. Errors are logged as warnings and are non fatal.
     """
-    target = out_path if out_path is not None else getattr(config, "FEN_LOG_PATH", None)
+    target = out_path if out_path is not None else config.FEN_LOG_PATH
     _safe_append_line(target, fen, "FEN")

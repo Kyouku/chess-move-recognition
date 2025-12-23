@@ -74,12 +74,8 @@ def record_detections(
     if not cap.isOpened():
         raise RuntimeError(f"Could not open video {video_path}")
 
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or int(
-        getattr(config, "FRAME_WIDTH", 1280),
-    )
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or int(
-        getattr(config, "FRAME_HEIGHT", 720),
-    )
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or config.FRAME_WIDTH
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or config.FRAME_HEIGHT
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
     # Nominal video FPS with fallback
@@ -87,7 +83,7 @@ def record_detections(
     if raw_fps and raw_fps > 0:
         video_fps = float(raw_fps)
     else:
-        video_fps = float(getattr(config, "VIDEO_FPS", 30.0))
+        video_fps = config.VIDEO_FPS
         _log.warning(
             "CAP_PROP_FPS not available, falling back to VIDEO_FPS=%.2f",
             video_fps,
@@ -96,28 +92,20 @@ def record_detections(
     pipeline = LivePipeline(
         frame_width=width,
         frame_height=height,
-        board_size_px=int(getattr(config, "BOARD_SIZE_PX", 640)),
-        margin_squares=float(getattr(config, "BOARD_MARGIN_SQUARES", 1.7)),
-        input_target_long_edge=int(
-            getattr(
-                config,
-                "CALIBRATION_TARGET_LONG_EDGE",
-                max(width, height),
-            ),
-        ),
-        min_board_area_ratio=float(
-            getattr(config, "AUTO_MIN_BOARD_AREA_RATIO", 0.0),
-        ),
+        board_size_px=config.BOARD_SIZE_PX,
+        margin_squares=config.BOARD_MARGIN_SQUARES,
+        input_target_long_edge=config.CALIBRATION_TARGET_LONG_EDGE,
+        min_board_area_ratio=config.AUTO_MIN_BOARD_AREA_RATIO,
         display=False,
     )
 
     detector = PieceDetector(
-        weights=getattr(config, "YOLO_PIECE_WEIGHTS"),
-        squares=int(getattr(config, "BOARD_SQUARES", 8)),
-        imgsz=int(getattr(config, "YOLO_PIECE_IMGSZ", 640)),
-        margin_squares=float(getattr(config, "BOARD_MARGIN_SQUARES", 1.7)),
-        conf_threshold=float(getattr(config, "YOLO_PIECE_CONF", 0.5)),
-        min_iou=float(getattr(config, "MIN_IOU", 0.15)),
+        weights=config.YOLO_PIECE_WEIGHTS,
+        squares=config.BOARD_SQUARES,
+        imgsz=config.YOLO_PIECE_IMGSZ,
+        margin_squares=config.BOARD_MARGIN_SQUARES,
+        conf_threshold=config.YOLO_PIECE_CONF,
+        min_iou=config.MIN_IOU,
     )
 
     # Try to use a saved homography if configured, otherwise calibrate
@@ -130,7 +118,7 @@ def record_detections(
         _log.info("Calibrating LivePipeline from video %s", video_path)
         ok = pipeline.calibrate_from_capture(
             cap,
-            max_frames=int(getattr(config, "CALIBRATION_MAX_FRAMES", 200)),
+            max_frames=config.CALIBRATION_MAX_FRAMES,
         )
         if not ok:
             cap.release()
@@ -152,7 +140,7 @@ def record_detections(
     detections: List[DetectionState] = []
     frame_idx = 0
     t_start = time.perf_counter()
-    report_interval = int(getattr(config, "DETECTION_PROGRESS_EVERY", 50))
+    report_interval = config.DETECTION_PROGRESS_EVERY
 
     while True:
         if max_frames is not None and frame_idx >= max_frames:

@@ -448,10 +448,10 @@ def main() -> None:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    alpha_default = float(getattr(config, "MOVE_FILTER_ALPHA", 0.6))
-    occ_threshold = float(getattr(config, "MOVE_FILTER_THRESHOLD", 0.6))
-    min_confirm_default = int(getattr(config, "MOVE_MIN_CONFIRM_FRAMES", 2))
-    debug = bool(getattr(config, "MOVE_DEBUG", False))
+    alpha_default = config.MOVE_FILTER_ALPHA
+    occ_threshold = config.MOVE_FILTER_THRESHOLD
+    min_confirm_default = config.MOVE_MIN_CONFIRM_FRAMES
+    debug = config.MOVE_DEBUG
 
     start_confirm_frames = min_confirm_default
 

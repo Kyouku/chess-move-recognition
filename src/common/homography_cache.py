@@ -23,11 +23,10 @@ def _get_homography_path() -> Optional[Path]:
 
     Returns a Path or None if homography caching is not configured.
     """
-    use_saved = bool(getattr(config, "USE_SAVED_HOMOGRAPHY", False))
-    if not use_saved:
+    if not config.USE_SAVED_HOMOGRAPHY:
         return None
 
-    h_path = getattr(config, "HOMOGRAPHY_PATH", None)
+    h_path = config.HOMOGRAPHY_PATH
     if not h_path:
         return None
 

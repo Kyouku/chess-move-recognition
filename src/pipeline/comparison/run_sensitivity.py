@@ -242,11 +242,11 @@ def main() -> None:
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    occ_threshold = float(getattr(config, "MOVE_FILTER_THRESHOLD", 0.6))
-    debug = bool(getattr(config, "MOVE_DEBUG", False))
+    occ_threshold = config.MOVE_FILTER_THRESHOLD
+    debug = config.MOVE_DEBUG
 
     # Keep start locking constant, otherwise the grid mixes 2 effects.
-    start_confirm_frames = int(getattr(config, "MOVE_MIN_CONFIRM_FRAMES", 2))
+    start_confirm_frames = config.MOVE_MIN_CONFIRM_FRAMES
 
     rows: List[Dict[str, Any]] = []
 

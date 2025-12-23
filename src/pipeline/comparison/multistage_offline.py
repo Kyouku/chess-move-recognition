@@ -36,12 +36,10 @@ def run_multistage(
     queue of size 1.
     """
     tracker = MoveTracker(
-        alpha=float(getattr(config, "MOVE_FILTER_ALPHA", 0.6)),
-        occ_threshold=float(getattr(config, "MOVE_FILTER_THRESHOLD", 0.6)),
-        min_confirm_frames=int(
-            getattr(config, "MOVE_MIN_CONFIRM_FRAMES", 2),
-        ),
-        debug=bool(getattr(config, "MOVE_DEBUG", False)),
+        alpha=config.MOVE_FILTER_ALPHA,
+        occ_threshold=config.MOVE_FILTER_THRESHOLD,
+        min_confirm_frames=config.MOVE_MIN_CONFIRM_FRAMES,
+        debug=config.MOVE_DEBUG,
     )
 
     frame_fens: List[str] = []

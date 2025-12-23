@@ -53,8 +53,8 @@ class SingleFramePipeline(BaseLivePipeline):
             source=source,
             width=width,
             height=height,
-            board_size_px=int(getattr(config, "BOARD_SIZE_PX", 640)),
-            window_name=str(getattr(config, "DISPLAY_WINDOW_NAME", "Board")),
+            board_size_px=config.BOARD_SIZE_PX,
+            window_name=config.DISPLAY_WINDOW_NAME,
         )
 
         # Used to wait until the standard start position is stable
@@ -63,14 +63,10 @@ class SingleFramePipeline(BaseLivePipeline):
         self._initialized: bool = False
 
         # Number of frames the start position must be seen to accept it
-        self._min_start_frames: int = int(
-            getattr(config, "START_MIN_CONFIRM_FRAMES", 4),
-        )
+        self._min_start_frames: int = config.START_MIN_CONFIRM_FRAMES
 
         # Number of identical placements before they are treated as stable
-        self._min_stable_frames: int = int(
-            getattr(config, "FEN_MIN_STABLE_FRAMES", 10),
-        )
+        self._min_stable_frames: int = config.FEN_MIN_STABLE_FRAMES
 
         # Stability tracking for placements
         self._last_seen_placement: Optional[str] = None
@@ -168,9 +164,9 @@ def run_live(
     Convenience function to start the live single frame baseline.
     """
     if width is None:
-        width = int(getattr(config, "FRAME_WIDTH", 1280))
+        width = config.FRAME_WIDTH
     if height is None:
-        height = int(getattr(config, "FRAME_HEIGHT", 720))
+        height = config.FRAME_HEIGHT
 
     pipeline = SingleFramePipeline(
         source=source,

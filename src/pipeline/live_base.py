@@ -173,10 +173,9 @@ class DetectionWorker(threading.Thread):
 
 
 def get_capture_source() -> CaptureSource:
-    """Return camera index or video path based on config."""
-    if getattr(config, "USE_VIDEO_FILE", False):
-        return str(getattr(config, "VIDEO_PATH"))
-    return int(getattr(config, "CAMERA_INDEX", 0))
+    if config.USE_VIDEO_FILE:
+        return str(config.VIDEO_PATH)
+    return int(config.CAMERA_INDEX)
 
 
 def _calibrate_pipeline(
@@ -215,7 +214,7 @@ def _calibrate_pipeline(
     _log.info("Calibrating from source...")
     ok = pipeline.calibrate_from_capture(
         temp_cap,
-        max_frames=getattr(config, "CALIBRATION_MAX_FRAMES", 200),
+        max_frames=config.CALIBRATION_MAX_FRAMES,
     )
     temp_cap.release()
     if not ok:
@@ -296,9 +295,9 @@ class BaseLivePipeline(ABC):
     ) -> None:
         self.source = source
         if width is None:
-            width = int(getattr(config, "FRAME_WIDTH", 1280))
+            width = config.FRAME_WIDTH
         if height is None:
-            height = int(getattr(config, "FRAME_HEIGHT", 720))
+            height = config.FRAME_HEIGHT
 
         # Decide capture size strategy based on source type
         if isinstance(source, int):
@@ -310,15 +309,9 @@ class BaseLivePipeline(ABC):
             self.height = int(probed_h)
 
         # Expose the actual source size via config for any downstream users
-        if hasattr(config, "set_actual_frame_size"):
-            try:
-                config.set_actual_frame_size(self.width, self.height)
-            except (AttributeError, TypeError):
-                pass
-        if hasattr(config, "FRAME_WIDTH"):
-            config.FRAME_WIDTH = self.width
-        if hasattr(config, "FRAME_HEIGHT"):
-            config.FRAME_HEIGHT = self.height
+        config.set_actual_frame_size(self.width, self.height)
+        config.FRAME_WIDTH = self.width
+        config.FRAME_HEIGHT = self.height
 
         self.board_size_px = int(board_size_px)
         self.window_name = window_name
@@ -327,13 +320,13 @@ class BaseLivePipeline(ABC):
 
         # Queues for frames and detection states
         self.frame_queue: "queue.Queue[np.ndarray]" = queue.Queue(
-            maxsize=getattr(config, "FRAME_QUEUE_SIZE", 3),
+            maxsize=config.FRAME_QUEUE_SIZE,
         )
         self.det_input_queue: "queue.Queue[np.ndarray]" = queue.Queue(
-            maxsize=getattr(config, "DETECTION_INPUT_QUEUE_SIZE", 1),
+            maxsize=config.DETECTION_INPUT_QUEUE_SIZE,
         )
         self.det_output_queue: "queue.Queue[DetectionState]" = queue.Queue(
-            maxsize=getattr(config, "DETECTION_OUTPUT_QUEUE_SIZE", 3),
+            maxsize=config.DETECTION_OUTPUT_QUEUE_SIZE,
         )
 
         # Stage 1: board rectifier
@@ -341,28 +334,20 @@ class BaseLivePipeline(ABC):
             frame_width=self.width,
             frame_height=self.height,
             board_size_px=self.board_size_px,
-            margin_squares=float(getattr(config, "BOARD_MARGIN_SQUARES", 1.7)),
-            input_target_long_edge=int(
-                getattr(
-                    config,
-                    "CALIBRATION_TARGET_LONG_EDGE",
-                    max(self.width, self.height),
-                )
-            ),
-            min_board_area_ratio=float(
-                getattr(config, "AUTO_MIN_BOARD_AREA_RATIO", 0.0),
-            ),
-            display=bool(getattr(config, "GUI_ENABLED", True)),
+            margin_squares=config.BOARD_MARGIN_SQUARES,
+            input_target_long_edge=config.CALIBRATION_TARGET_LONG_EDGE,
+            min_board_area_ratio=config.AUTO_MIN_BOARD_AREA_RATIO,
+            display=config.GUI_ENABLED,
         )
 
         # Stage 2: detector(s)
         self.detector = PieceDetector(
-            weights=getattr(config, "YOLO_PIECE_WEIGHTS"),
-            squares=int(getattr(config, "BOARD_SQUARES", 8)),
-            imgsz=int(getattr(config, "YOLO_PIECE_IMGSZ", 640)),
-            margin_squares=float(getattr(config, "BOARD_MARGIN_SQUARES", 1.7)),
-            conf_threshold=float(getattr(config, "YOLO_PIECE_CONF", 0.5)),
-            min_iou=float(getattr(config, "MIN_IOU", 0.15)),
+            weights=config.YOLO_PIECE_WEIGHTS,
+            squares=config.BOARD_SQUARES,
+            imgsz=config.YOLO_PIECE_IMGSZ,
+            margin_squares=config.BOARD_MARGIN_SQUARES,
+            conf_threshold=config.YOLO_PIECE_CONF,
+            min_iou=config.MIN_IOU,
         )
 
         self.reader_thread = FrameReader(
@@ -375,7 +360,7 @@ class BaseLivePipeline(ABC):
 
         self.det_workers: List[DetectionWorker] = []
 
-        num_workers = int(getattr(config, "DETECTION_WORKERS", 1))
+        num_workers = config.DETECTION_WORKERS
         if num_workers <= 1:
             worker = DetectionWorker(
                 detector=self.detector,
@@ -388,14 +373,12 @@ class BaseLivePipeline(ABC):
         else:
             for i in range(num_workers):
                 det_i = PieceDetector(
-                    weights=getattr(config, "YOLO_PIECE_WEIGHTS"),
-                    squares=int(getattr(config, "BOARD_SQUARES", 8)),
-                    imgsz=int(getattr(config, "YOLO_PIECE_IMGSZ", 640)),
-                    margin_squares=float(
-                        getattr(config, "BOARD_MARGIN_SQUARES", 1.7),
-                    ),
-                    conf_threshold=float(getattr(config, "YOLO_PIECE_CONF", 0.5)),
-                    min_iou=float(getattr(config, "MIN_IOU", 0.15)),
+                    weights=config.YOLO_PIECE_WEIGHTS,
+                    squares=config.BOARD_SQUARES,
+                    imgsz=config.YOLO_PIECE_IMGSZ,
+                    margin_squares=config.BOARD_MARGIN_SQUARES,
+                    conf_threshold=config.YOLO_PIECE_CONF,
+                    min_iou=config.MIN_IOU,
                 )
                 worker = DetectionWorker(
                     detector=det_i,
@@ -455,17 +438,13 @@ class BaseLivePipeline(ABC):
     @staticmethod
     def _configure_opencv() -> None:
         cv2.setUseOptimized(True)
-        try:
-            if hasattr(config, "OPENCV_NUM_THREADS"):
-                threads = int(getattr(config, "OPENCV_NUM_THREADS") or 0)
-                if threads > 0:
-                    cv2.setNumThreads(threads)
-        except (AttributeError, TypeError, cv2.error):
-            pass
+        threads = config.OPENCV_NUM_THREADS
+        if threads > 0:
+            cv2.setNumThreads(threads)
 
     @staticmethod
     def _configure_gui() -> None:
-        enable_gui(bool(getattr(config, "GUI_ENABLED", True)))
+        enable_gui(config.GUI_ENABLED)
 
     # ------------------------------------------------------------------
     # Main run and stop logic
@@ -601,8 +580,8 @@ class BaseLivePipeline(ABC):
             display_frame = draw_piece_overlay(
                 display_frame,
                 self.latest_pieces,
-                squares=int(getattr(config, "BOARD_SQUARES", 8)),
-                margin_squares=float(getattr(config, "BOARD_MARGIN_SQUARES", 1.7)),
+                squares=config.BOARD_SQUARES,
+                margin_squares=config.BOARD_MARGIN_SQUARES,
                 raw_boxes=self.latest_boxes,
                 confidences=self.latest_confs,
             )

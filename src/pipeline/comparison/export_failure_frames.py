@@ -53,7 +53,7 @@ class FailureFrame:
 
 
 # Will be set in main via CLI, default from config
-_MARGIN_SQUARES: float = float(getattr(config, "BOARD_MARGIN_SQUARES", 0.0))
+_MARGIN_SQUARES: float = config.BOARD_MARGIN_SQUARES
 
 
 # ------------------------------------------------------------
@@ -878,9 +878,9 @@ def _init_rectifier_for_video(
         is_game3: bool,
         homography_override_path: Optional[Path],
 ) -> Any:
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or int(getattr(config, "FRAME_WIDTH", 1280))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or int(getattr(config, "FRAME_HEIGHT", 720))
-    board_size_px = int(getattr(config, "BOARD_SIZE_PX", 640))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or config.FRAME_WIDTH
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or config.FRAME_HEIGHT
+    board_size_px = config.BOARD_SIZE_PX
 
     # Game3: if a homography override is provided, force fixed warp and never calibrate
     if is_game3 and homography_override_path is not None:
@@ -894,9 +894,9 @@ def _init_rectifier_for_video(
         frame_width=width,
         frame_height=height,
         board_size_px=board_size_px,
-        margin_squares=float(getattr(config, "BOARD_MARGIN_SQUARES", 1.7)),
-        input_target_long_edge=int(getattr(config, "CALIBRATION_TARGET_LONG_EDGE", max(width, height))),
-        min_board_area_ratio=float(getattr(config, "AUTO_MIN_BOARD_AREA_RATIO", 0.0)),
+        margin_squares=config.BOARD_MARGIN_SQUARES,
+        input_target_long_edge=config.CALIBRATION_TARGET_LONG_EDGE,
+        min_board_area_ratio=config.AUTO_MIN_BOARD_AREA_RATIO,
         display=False,
     )
 
@@ -910,7 +910,7 @@ def _init_rectifier_for_video(
         log.info("Calibrating for this video")
         ok = pipeline.calibrate_from_capture(
             cap,
-            max_frames=int(getattr(config, "CALIBRATION_MAX_FRAMES", 200)),
+            max_frames=config.CALIBRATION_MAX_FRAMES,
         )
         if not ok:
             raise RuntimeError("Calibration failed, cannot export rectified frames")
@@ -958,7 +958,7 @@ def main() -> None:
     ap.add_argument(
         "--margin_squares",
         type=float,
-        default=float(getattr(config, "BOARD_MARGIN_SQUARES", 0.0)),
+        default=config.BOARD_MARGIN_SQUARES,
         help="Margin squares around the 8x8 grid in the rectified board image (must match rectifier).",
     )
 

@@ -80,14 +80,10 @@ class _BaselineRunner:
         self._initialized: bool = False
 
         # Frames required to accept the start position
-        self._min_start_frames: int = int(
-            getattr(config, "START_MIN_CONFIRM_FRAMES", 4),
-        )
+        self._min_start_frames: int = config.START_MIN_CONFIRM_FRAMES
 
         # Frames with identical placement before we treat it as stable
-        self._min_stable_frames: int = int(
-            getattr(config, "FEN_MIN_STABLE_FRAMES", 10),
-        )
+        self._min_stable_frames: int = config.FEN_MIN_STABLE_FRAMES
 
         # Current reference board (updated on confirmed or forced moves)
         self._board: Optional[chess.Board] = None

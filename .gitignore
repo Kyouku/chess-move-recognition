@@ -42,40 +42,40 @@ notebooks/.ipynb_cache/
 # DATA AND MODELS
 # ============================
 # Large or local only data that should not be committed
-data/raw/
-data/gt/
-data/images/
-data/videos/
-data/saved_h_cache/
-data/labels/
-data/tmp/
-datasets/
-models/comparison_results
-!models/*
-!models/scripts/
-!models/scripts/**
-runs/
-weights/
-results/
+# Note: Videos, GT data and training datasets are hosted externally (see README)
+data/*/
+!data/eval_manifest.json
 
-# Generic large binary artifacts
-*.pt          # YOLO weight files
-*.onnx        # exported models
+# Specifically ignore artifacts and results under data/
+data/detected_moves/
+data/detections/
+!data/detections/*.pkl
+data/figures/
+data/results/
+data/saved_h_cache/
+data/training_images/
+data/tmp/
+
+# Models and training
+models/yolo11_runs/
+models/comparison_results/
+datasets/
+
+# Keep only the essential model if you want, otherwise keep all weights ignored
+# !models/yolo11s_best_640.onnx
+*.pt
+*.onnx
 *.tflite
 *.engine
+!models/scripts/
+!models/scripts/**
+
+# Generic artifacts
 *.log
-*.csv         # generated evaluation logs
-*.json        # generated predictions or eval outputs
-*.yaml        # config exports (keep only templates you need)
-
-# Project specific training artifacts
-models/yolo11_runs
-models/yolo11_runs/*
-
-# Live run artifacts (game detections and detected moves)
-data/detected_moves/
-!data/detections
-!data/detections/*
+*.csv
+*.yaml
+*.json
+!data/eval_manifest.json
 
 # ============================
 # VIDEO AND IMAGE CAPTURE
