@@ -94,8 +94,7 @@ python -m src.pipeline.comparison.compare_pipelines --video data/videos/game1.mp
 
 - `python -m src.pipeline.comparison.run_ablation --manifest data/eval_manifest.json --out data/results/ablation.csv`:
   Runs ablation studies on pipeline components.
--
-`python -m src.pipeline.comparison.run_sensitivity --manifest data/eval_manifest.json --out data/results/sensitivity.csv`:
+- `python -m src.pipeline.comparison.run_sensitivity --manifest data/eval_manifest.json --out data/results/sensitivity.csv`:
 Evaluates sensitivity to hyperparameters.
 
 ## Project Structure
