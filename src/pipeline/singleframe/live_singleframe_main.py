@@ -13,7 +13,7 @@ from typing import Dict, Optional
 import chess
 
 from src import config
-from src.common.app_logging import get_logger
+from src.common.app_logging import get_logger, set_log_level
 from src.common.chess_io import append_fen_log
 from src.common.types import DetectionState
 from src.pipeline.fen_utils import (
@@ -115,9 +115,7 @@ class SingleFramePipeline(BaseLivePipeline):
 
     def handle_detection_state(self, state: DetectionState) -> None:
         """
-        Called by BaseLivePipeline for each detected board state.
-
-        Only performs stability filtering and FEN export.
+        Stability filtering and FEN export.
         """
         self._update_start_initialization(state)
         if not self._initialized:
@@ -125,7 +123,7 @@ class SingleFramePipeline(BaseLivePipeline):
 
         placement = detection_state_to_placement(state)
 
-        # Stability tracking over placements
+        # Stability tracking
         if placement == self._last_seen_placement:
             self._same_seen_frames += 1
         else:
@@ -146,7 +144,7 @@ class SingleFramePipeline(BaseLivePipeline):
 
         _log.info("Baseline stable FEN: %s", fen)
 
-        # Optional: write FEN snapshots using centralized helper (non fatal)
+        # Write FEN snapshots (non-fatal)
         append_fen_log(fen)
 
 
@@ -177,6 +175,7 @@ def run_live(
 
 
 def main() -> None:
+    set_log_level(config.LOG_LEVEL)
     source = get_capture_source()
     run_live(source)
 

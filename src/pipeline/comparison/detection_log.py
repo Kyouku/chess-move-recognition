@@ -22,7 +22,7 @@ from src.common.homography_cache import (
     apply_saved_homography,
     save_homography_from_pipeline,
 )
-from src.common.io_utils import ensure_parent_dir
+from src.common.chess_io import ensure_parent_dir
 from src.common.types import DetectionState
 from src.stage1.board_rectifier import LivePipeline
 from src.stage2.piece_detection import PieceDetector

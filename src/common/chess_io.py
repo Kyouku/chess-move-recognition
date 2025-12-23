@@ -9,12 +9,23 @@ import chess.pgn
 
 from src import config
 from .app_logging import get_logger
-from .io_utils import ensure_parent_dir
 from .types import MoveInfo
 
 _log = get_logger(__name__)
 
 PathLike = Union[Path, str]
+
+
+def ensure_parent_dir(path: Path) -> None:
+    """
+    Ensure the parent directory of the given file path exists.
+
+    Errors are logged as warnings and are non-fatal.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _log.warning("Could not ensure parent dir for %s: %s", path, exc)
 
 
 def _normalize_path(path_like: Optional[PathLike]) -> Optional[Path]:

@@ -145,7 +145,6 @@ class PieceDetector:
         )
         raw_conf: Dict[str, Optional[float]] = dict.fromkeys(self._squares_list, None)
 
-        # YOLO inference
         results = self._yolo_model.predict(
             source=board_bgr,
             imgsz=self.imgsz,
@@ -167,10 +166,6 @@ class PieceDetector:
                 x1, y1, x2, y2 = xyxy[idx]
                 conf = float(confs[idx])
 
-                # Cut tall boxes from the top in pixel units,
-                # similar to:
-                # if box_y4 - box_y1 > 60:
-                #     y1 += 40
                 x1_adj, y1_adj, x2_adj, y2_adj = self._adjust_tall_box(x1, y1, x2, y2)
 
                 best_sq, best_iou = self._assign_box_to_square_iou(

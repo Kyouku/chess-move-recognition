@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import argparse
 import csv
-import inspect
 import json
 import statistics
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from src import config
-from src.pipeline.comparison.common import PipelineResult, iter_time_based_should_process
-from src.pipeline.comparison.detection_log import load_detections
+from src.common.app_logging import get_logger
+from src.pipeline.comparison.common import (
+    PipelineResult,
+    iter_time_based_should_process,
+    is_game3,
+    load_detections_with_optional_homography,
+)
 from src.pipeline.comparison.metrics import (
     fen_at_ply_accuracy,
     fen_interval_accuracy,
@@ -21,141 +25,9 @@ from src.pipeline.comparison.metrics import (
 )
 from src.stage3.move_tracking import MoveTracker
 
-try:
-    from src.common.app_logging import get_logger
-except Exception:  # pragma: no cover
-    from src.common.io_utils import get_logger  # type: ignore
-
 log = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Homography override only for game3
-# ---------------------------------------------------------------------------
-
-def _is_game3(name: str) -> bool:
-    """
-    Best-effort identification of "game3" naming variants.
-    Adjust if your manifest uses a different identifier.
-    """
-    n = name.strip().lower().replace(" ", "").replace("-", "_")
-    return n in {"game3", "game_3", "3"}
-
-
-def _load_homography_matrix(path: Path) -> List[List[float]]:
-    """
-    Load a saved 3x3 homography matrix.
-
-    Supported formats:
-      - .json with {"H": [[...],[...],[...]]} or {"homography": [[...],[...],[...]]}
-      - .npy containing a 3x3 array
-      - .txt/.csv containing 3 rows of 3 numbers (space or comma separated)
-
-    Returns:
-      3x3 list of floats.
-    """
-    if not path.exists():
-        raise FileNotFoundError(str(path))
-
-    suf = path.suffix.lower()
-
-    if suf == ".json":
-        obj = json.loads(path.read_text(encoding="utf-8"))
-        H = obj.get("H", None) or obj.get("homography", None) or obj.get("matrix", None)
-        if not isinstance(H, list) or len(H) != 3:
-            raise ValueError(
-                f"Invalid homography JSON in {path} (expected 3x3 list under key H/homography/matrix)."
-            )
-        if any((not isinstance(row, list) or len(row) != 3) for row in H):
-            raise ValueError(f"Invalid homography JSON in {path} (expected 3x3 list).")
-        return [[float(x) for x in row] for row in H]
-
-    if suf == ".npy":
-        try:
-            import numpy as np  # type: ignore
-        except Exception as e:
-            raise RuntimeError("Cannot load .npy homography because numpy is not available.") from e
-        arr = np.load(str(path))
-        if getattr(arr, "shape", None) != (3, 3):
-            raise ValueError(
-                f"Invalid homography npy in {path} (expected shape (3,3), got {getattr(arr, 'shape', None)})."
-            )
-        return [[float(x) for x in row] for row in arr.tolist()]
-
-    # Fallback: parse simple text
-    txt = path.read_text(encoding="utf-8").strip().splitlines()
-    rows: List[List[float]] = []
-    for line in txt:
-        line = line.strip()
-        if not line:
-            continue
-        parts = [p for p in line.replace(",", " ").split(" ") if p]
-        rows.append([float(p) for p in parts])
-
-    if len(rows) != 3 or any(len(r) != 3 for r in rows):
-        raise ValueError(f"Invalid homography text in {path} (expected 3 lines of 3 numbers).")
-    return rows
-
-
-def _attach_homography_best_effort(det_log: Any, homography_path: Path) -> None:
-    """
-    If load_detections cannot accept a homography override directly, attach the matrix
-    to the returned det_log object as metadata. This is harmless if unused downstream.
-    """
-    try:
-        H = _load_homography_matrix(homography_path)
-    except Exception as e:
-        log.warning("Failed to read homography file %s: %s", str(homography_path), str(e))
-        return
-
-    for attr in ("H", "homography", "homography_matrix"):
-        try:
-            setattr(det_log, attr, H)
-            return
-        except Exception:
-            pass
-
-    log.warning(
-        "Homography override provided, but detection log object has no known homography attribute. "
-        "If your detections are already rectified into board squares, you must regenerate the detection "
-        "log for game3 using the saved homography at recording time."
-    )
-
-
-def _load_detections_with_optional_homography(det_path: str, homography_path: Path | None) -> Any:
-    """
-    Try to pass a homography override into load_detections if supported.
-    Otherwise load normally and attach metadata best-effort.
-    """
-    if homography_path is None:
-        return load_detections(det_path)
-
-    sig = inspect.signature(load_detections)
-    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-
-    kwargs: Dict[str, Any] = {}
-    candidate_keys = (
-        "homography_path",
-        "override_homography_path",
-        "calibration_path",
-        "saved_homography_path",
-        "homography",
-    )
-
-    for key in candidate_keys:
-        if key in sig.parameters:
-            kwargs[key] = str(homography_path)
-            break
-
-    if not kwargs and has_varkw:
-        kwargs["homography_path"] = str(homography_path)
-
-    det_log = load_detections(det_path, **kwargs) if kwargs else load_detections(det_path)
-
-    if not kwargs:
-        _attach_homography_best_effort(det_log, homography_path)
-
-    return det_log
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +127,7 @@ def main() -> None:
 
         # Only for game3: determine homography path, CLI takes precedence over manifest fields
         homography_override: Path | None = None
-        if _is_game3(name):
+        if is_game3(name):
             if args.game3_homography:
                 homography_override = Path(args.game3_homography)
             else:
@@ -264,7 +136,7 @@ def main() -> None:
                         homography_override = Path(str(g[k]))
                         break
 
-        det_log = _load_detections_with_optional_homography(str(g["detections"]), homography_override)
+        det_log = load_detections_with_optional_homography(Path(g["detections"]), homography_override)
         gt = load_ground_truth(str(g["gt"]))
 
         if homography_override is not None:

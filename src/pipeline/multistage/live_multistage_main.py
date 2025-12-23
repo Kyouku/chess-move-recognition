@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import queue
 from typing import Optional, Tuple, Dict, List
 
@@ -90,10 +89,7 @@ class MultiStagePipeline(BaseLivePipeline):
 
     def handle_detection_state(self, state: DetectionState) -> None:
         """
-        Called once for every DetectionState drained from the Stage 2 queue.
-
-        Only occupancy and labels are needed by MoveTracker, so we enqueue
-        a compact tuple for the MoveTrackerWorker.
+        Enqueue occupancy and labels for MoveTrackerWorker.
         """
         payload: Tuple[Dict[str, bool], Dict[str, Optional[str]]] = (
             state.occupancy,
@@ -102,16 +98,11 @@ class MultiStagePipeline(BaseLivePipeline):
         try:
             self.move_in_queue.put_nowait(payload)
         except queue.Full:
-            # Worker is busy, drop current state rather than blocking
             _log.debug("Move input queue full, dropping detection state")
 
     def after_detection_batch(self) -> None:
         """
-        Called once per frame after all DetectionStates for that frame
-        have been processed.
-
-        Here we drain all MoveInfo objects currently available from
-        the move worker output queue.
+        Drain confirmed moves from MoveTrackerWorker.
         """
         while True:
             try:
@@ -225,10 +216,10 @@ def main() -> None:
     """
     Minimal CLI entry point for manual testing.
 
-    Currently just sets a fixed log level and runs with the
+    Currently just sets the log level from config and runs with the
     configured capture source.
     """
-    set_log_level(logging.DEBUG)
+    set_log_level(config.LOG_LEVEL)
     src = get_capture_source()
     run_live(src)
 

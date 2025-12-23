@@ -42,14 +42,13 @@ class BoardStateFilter:
         self.alpha = alpha
         self.occ_threshold = occ_threshold
 
+        # Probability of occupancy per square
         self._p_occ: List[float] = [0.0] * 64
         self._prev_binary: List[bool] = [False] * 64
         self._current_binary: List[bool] = [False] * 64
 
     def reset(self) -> None:
-        """
-        Reset filter state.
-        """
+        """Reset filter state."""
         self._p_occ = [0.0] * 64
         self._prev_binary = [False] * 64
         self._current_binary = [False] * 64
@@ -58,27 +57,15 @@ class BoardStateFilter:
             self,
             detections: Iterable[PieceDetection],
     ) -> Tuple[Dict[str, bool], Dict[str, bool]]:
-        """
-        Update filter from piece detections.
-
-        Each detection on a square counts as full evidence 1.0 for occupied.
-        """
-        evidence: Dict[str, float] = {chess.square_name(sq): 0.0 for sq in chess.SQUARES}
-
-        for det in detections:
-            square_name = det.square
-            if square_name in evidence:
-                evidence[square_name] = 1.0
-
-        return self._update(evidence)
+        """Converts piece detections to occupancy mask and updates."""
+        occ = {d.square: True for d in detections if d.square}
+        return self.update_from_occupancy(occ)
 
     def update_from_occupancy(
             self,
             occupancy: Dict[str, bool],
     ) -> Tuple[Dict[str, bool], Dict[str, bool]]:
-        """
-        Convenience wrapper for occupancy only evidence.
-        """
+        """Update with occupancy-only evidence."""
         ev = _evidence_from_occupancy(occupancy)
         return self._update(ev)
 
@@ -213,7 +200,6 @@ class MoveTracker:
             lbl = pieces.get(name)
             lbl_str = "." if lbl is None else str(lbl)
             _log.debug("  %s: occ=%d label=%s", name, int(bool(occupied)), lbl_str)
-        _log.debug("[MoveTracker] end of state dump")
 
     @staticmethod
     def _normalize_label(label: Optional[str]) -> Optional[str]:
@@ -558,100 +544,6 @@ class MoveTracker:
 
         self._debug_print_board("reset-to-start initial")
 
-    def update_from_detections(
-            self,
-            detections: Iterable[PieceDetection],
-    ) -> Optional[MoveInfo]:
-        """
-        Legacy API when you have piece level detections as PieceDetection.
-        This only uses occupancy internally.
-        """
-        self._frame_index += 1
-        prev_occ, curr_occ = self.filter.update_from_detections(detections)
-
-        if self._handle_start_detection(curr_occ):
-            self._last_occ_for_debug = dict(curr_occ)
-            self._last_pieces_for_debug = None
-            return None
-
-        if prev_occ == curr_occ and not self._pending_candidates:
-            if self._debug:
-                _log.debug(
-                    "[MoveTracker] no change in filtered occupancy, no pending candidates, skipping move search",
-                )
-            return None
-
-        candidates = self._candidate_moves_for_target_occupancy(curr_occ)
-
-        if self._debug and candidates:
-            if self._last_occ_for_debug is not None:
-                self._debug_dump_state(
-                    "previous filtered state (detections)",
-                    self._frame_index - 1,
-                    self._last_occ_for_debug,
-                    {},
-                )
-            self._debug_dump_state(
-                "current filtered state (detections)",
-                self._frame_index,
-                curr_occ,
-                {},
-            )
-
-        move = self._confirm_or_store_candidates(candidates)
-        if move is None:
-            self._last_occ_for_debug = dict(curr_occ)
-            self._last_pieces_for_debug = None
-            return None
-
-        return self._finalize_move(move, curr_occ, None)
-
-    def update_from_occupancy(
-            self,
-            occupancy: Dict[str, bool],
-    ) -> Optional[MoveInfo]:
-        """
-        Legacy convenience wrapper for occupancy only detections.
-        """
-        self._frame_index += 1
-        prev_occ, curr_occ = self.filter.update_from_occupancy(occupancy)
-
-        if self._handle_start_detection(curr_occ):
-            self._last_occ_for_debug = dict(curr_occ)
-            self._last_pieces_for_debug = None
-            return None
-
-        if prev_occ == curr_occ and not self._pending_candidates:
-            if self._debug:
-                _log.debug(
-                    "[MoveTracker] no change in filtered occupancy, no pending candidates, skipping move search",
-                )
-            return None
-
-        candidates = self._candidate_moves_for_target_occupancy(curr_occ)
-
-        if self._debug and candidates:
-            if self._last_occ_for_debug is not None:
-                self._debug_dump_state(
-                    "previous filtered state (occupancy)",
-                    self._frame_index - 1,
-                    self._last_occ_for_debug,
-                    {},
-                )
-            self._debug_dump_state(
-                "current filtered state (occupancy)",
-                self._frame_index,
-                curr_occ,
-                {},
-            )
-
-        move = self._confirm_or_store_candidates(candidates)
-        if move is None:
-            self._last_occ_for_debug = dict(curr_occ)
-            self._last_pieces_for_debug = None
-            return None
-
-        return self._finalize_move(move, curr_occ, None)
 
     def update_from_state(
             self,
@@ -774,8 +666,7 @@ class MoveTracker:
 
     def update_from_detection_state(self, state: DetectionState) -> Optional[MoveInfo]:
         """
-        Convenience wrapper to accept a DetectionState container produced by
-        Stage 2 and delegate to the main update_from_state API.
+        Accepts a DetectionState container and delegates to update_from_state.
         """
         return self.update_from_state(state.occupancy, state.pieces)
 

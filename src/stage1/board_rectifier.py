@@ -93,14 +93,14 @@ def _try_find_corners(
     """
     corners: Optional[np.ndarray] = None
 
-    # Flags for classic corner detection variants
+    # Flags for corner detection
     pattern_flags = (
             cv2.CALIB_CB_ADAPTIVE_THRESH
             | cv2.CALIB_CB_NORMALIZE_IMAGE
             | cv2.CALIB_CB_FILTER_QUADS
     )
 
-    # Modern SB method first
+    # Attempt modern SB method first
     if hasattr(cv2, "findChessboardCornersSB"):
         sb_res = cv2.findChessboardCornersSB(
             gray,
@@ -114,15 +114,13 @@ def _try_find_corners(
         elif sb_res is not None:
             corners = np.asarray(sb_res, dtype=np.float32)
 
-    # Fallbacks to classic API with light preprocessing variants
+    # Classic fallback variants
     if corners is None:
-        # 1) As is
         ok, crn = cv2.findChessboardCorners(gray, pattern_size, pattern_flags)
         if ok and crn is not None:
             corners = np.asarray(crn, dtype=np.float32)
 
     if corners is None:
-        # 2) Slight blur can help reduce noise
         try:
             gray_blur = cv2.GaussianBlur(gray, (5, 5), 0)
             ok, crn = cv2.findChessboardCorners(gray_blur, pattern_size, pattern_flags)
@@ -132,7 +130,6 @@ def _try_find_corners(
             pass
 
     if corners is None:
-        # 3) Local contrast (CLAHE) often helps in uneven lighting
         try:
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             gray_eq = clahe.apply(gray)

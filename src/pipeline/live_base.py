@@ -63,18 +63,17 @@ class FrameReader(threading.Thread):
             _log.error("Could not open source: %s", self.source)
             return
 
-        # Hint desired capture properties to reduce downstream resizing cost
+        # Hint desired capture properties to reduce overhead
         try:
             if self.width > 0:
                 self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, float(self.width))
             if self.height > 0:
                 self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, float(self.height))
-            # Reduce internal buffering if backend supports it
             self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except cv2.error:
             pass
 
-        # Log both the requested and the actual negotiated capture size
+        # Negotiated capture size
         try:
             act_w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             act_h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))

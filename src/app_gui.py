@@ -4,16 +4,9 @@ from typing import Callable, Any
 
 import cv2
 
-try:
-    from src.pipeline.multistage import config as _config
-except ImportError:
-    # Ensure _config is defined even if import fails to satisfy linters and type checkers
-    _config = None  # type: ignore[assignment]
-    _DEFAULT_ENABLED = True
-else:
-    _DEFAULT_ENABLED = bool(getattr(_config, "GUI_ENABLED", True))
+from src import config
 
-_GUI_ENABLED: bool = _DEFAULT_ENABLED
+_GUI_ENABLED: bool = bool(config.GUI_ENABLED)
 
 
 def enable_gui(enabled: bool) -> None:

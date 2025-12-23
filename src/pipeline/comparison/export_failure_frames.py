@@ -11,18 +11,18 @@ import chess
 import cv2
 
 from src import config
+from src.common.app_logging import get_logger
 from src.common.homography_cache import apply_saved_homography, save_homography_from_pipeline
 from src.pipeline.comparison.baseline_offline import run_baseline
+from src.pipeline.comparison.common import (
+    is_game3,
+    load_homography_matrix,
+)
 from src.pipeline.comparison.detection_log import load_detections
 from src.pipeline.comparison.metrics import load_ground_truth
 from src.pipeline.comparison.multistage_offline import run_multistage
 from src.pipeline.fen_utils import placement_from_fen
 from src.stage1.board_rectifier import LivePipeline
-
-try:
-    from src.common.app_logging import get_logger
-except Exception:  # pragma: no cover
-    from src.common.io_utils import get_logger  # type: ignore
 
 log = get_logger(__name__)
 
@@ -56,69 +56,6 @@ class FailureFrame:
 _MARGIN_SQUARES: float = config.BOARD_MARGIN_SQUARES
 
 
-# ------------------------------------------------------------
-# Game3 homography override helpers
-# ------------------------------------------------------------
-def _is_game3(name: str) -> bool:
-    """
-    Best-effort identification of "game3" naming variants.
-    Adjust if your manifest uses a different identifier.
-    """
-    n = name.strip().lower().replace(" ", "").replace("-", "_")
-    return n in {"game3", "game_3", "3"}
-
-
-def _load_homography_matrix(path: Path) -> List[List[float]]:
-    """
-    Load a saved 3x3 homography matrix.
-
-    Supported formats:
-      - .json with {"H": [[...],[...],[...]]} or {"homography": [[...],[...],[...]]}
-      - .npy containing a 3x3 array
-      - .txt/.csv containing 3 rows of 3 numbers (space or comma separated)
-
-    Returns:
-      3x3 list of floats.
-    """
-    if not path.exists():
-        raise FileNotFoundError(str(path))
-
-    suf = path.suffix.lower()
-
-    if suf == ".json":
-        obj = json.loads(path.read_text(encoding="utf-8"))
-        H = obj.get("H", None) or obj.get("homography", None) or obj.get("matrix", None)
-        if not isinstance(H, list) or len(H) != 3:
-            raise ValueError(
-                f"Invalid homography JSON in {path} (expected 3x3 list under key H/homography/matrix)."
-            )
-        if any((not isinstance(row, list) or len(row) != 3) for row in H):
-            raise ValueError(f"Invalid homography JSON in {path} (expected 3x3 list).")
-        return [[float(x) for x in row] for row in H]
-
-    if suf == ".npy":
-        import numpy as np  # type: ignore
-
-        arr = np.load(str(path))
-        if getattr(arr, "shape", None) != (3, 3):
-            raise ValueError(
-                f"Invalid homography npy in {path} (expected shape (3,3), got {getattr(arr, 'shape', None)})."
-            )
-        return [[float(x) for x in row] for row in arr.tolist()]
-
-    # Fallback: parse simple text
-    txt = path.read_text(encoding="utf-8").strip().splitlines()
-    rows: List[List[float]] = []
-    for line in txt:
-        line = line.strip()
-        if not line:
-            continue
-        parts = [p for p in line.replace(",", " ").split(" ") if p]
-        rows.append([float(p) for p in parts])
-
-    if len(rows) != 3 or any(len(r) != 3 for r in rows):
-        raise ValueError(f"Invalid homography text in {path} (expected 3 lines of 3 numbers).")
-    return rows
 
 
 class _WarpRectifier:
@@ -884,7 +821,7 @@ def _init_rectifier_for_video(
 
     # Game3: if a homography override is provided, force fixed warp and never calibrate
     if is_game3 and homography_override_path is not None:
-        H_list = _load_homography_matrix(homography_override_path)
+        H_list = load_homography_matrix(homography_override_path)
         H_best = _choose_H_or_invH(cap, H_list, board_size_px)
         log.info("Game3: using fixed homography warp from %s", str(homography_override_path))
         return _WarpRectifier(H_best, board_size_px)
@@ -994,7 +931,7 @@ def main() -> None:
         if not cap.isOpened():
             raise RuntimeError(f"Could not open video: {video_path}")
 
-        is_g3 = _is_game3(name)
+        is_g3 = is_game3(name)
 
         homography_override: Optional[Path] = None
         if is_g3:
