@@ -14,19 +14,6 @@ This is the open‑source companion to my Bachelor's thesis _"Automated Chess Mo
 
 ---
 
-## Demo
-
-> _Place demo assets in `docs/assets/` and uncomment the references below._
-
-```
-docs/assets/demo.gif           ← annotated live capture
-docs/assets/board_overlay.png  ← Stage 1 rectification result
-docs/assets/piece_detect.png   ← Stage 2 YOLO output
-docs/assets/move_log.png       ← Stage 3 SAN move log
-```
-
----
-
 ## Why this project
 
 Reconstructing a full chess game from an overhead phone camera sounds easy — until hands occlude pieces mid‑move, glare flips a bishop into a knight, and a single misclassified square corrupts the rest of the game. Commercial e‑boards solve it with hardware sensors, but they are out of reach for amateur clubs and small tournaments.
