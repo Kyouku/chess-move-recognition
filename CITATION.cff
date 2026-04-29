@@ -1,0 +1,47 @@
+cff-version: 1.2.0
+title: >-
+  Automated Chess Move Recognition in Live Video using a
+  Multi-Stage Pipeline: A Comparison with a
+  Single-Image-Based Approach
+message: >-
+  If you use this software, the accompanying datasets, or the
+  evaluation protocol, please cite the underlying Bachelor's
+  thesis as below.
+type: software
+authors:
+  - given-names: Jannes
+    family-names: Wolarz
+repository-code: "https://github.com/JannesWolarz/chess-move-recognition"
+abstract: >-
+  Open-source companion code to the B.Sc. thesis on
+  automated chess move recognition from monocular
+  over-the-board video. Implements a multi-stage pipeline
+  (board rectification, YOLO11 piece detection, EMA-smoothed
+  square-level memory with rule-constrained move inference)
+  and a single-frame FEN-plateau baseline that share the
+  same detector, enabling a controlled head-to-head
+  comparison on a five-game over-the-board video corpus.
+keywords:
+  - chess
+  - computer-vision
+  - object-detection
+  - yolo
+  - opencv
+  - move-recognition
+  - temporal-tracking
+  - python-chess
+license: MIT
+preferred-citation:
+  type: thesis
+  title: >-
+    Automated Chess Move Recognition in Live Video using a
+    Multi-Stage Pipeline: A Comparison with a
+    Single-Image-Based Approach
+  authors:
+    - given-names: Jannes
+      family-names: Wolarz
+  thesis-type: "Bachelor's Thesis"
+  institution:
+    name: University of Europe for Applied Sciences
+  year: 2026
+  month: 1

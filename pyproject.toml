@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chess-move-recognition"
-version = "0.1.0"
-description = "Real-time chess move recognition from video using a multi-stage CV pipeline (board rectification, YOLO piece detection, temporal move tracking)."
+version = "1.0.0"
+description = "Automated chess move recognition from monocular over-the-board video — multi-stage pipeline (board rectification, YOLO11 piece detection, EMA-smoothed rule-constrained move tracking) benchmarked against a single-frame FEN baseline. Companion code to the B.Sc. thesis by Jannes Wolarz (2026)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
