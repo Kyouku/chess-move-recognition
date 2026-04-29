@@ -37,8 +37,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/JannesWolarz/chess-move-recognition"
-Issues = "https://github.com/JannesWolarz/chess-move-recognition/issues"
+Repository = "https://github.com/Kyouku/chess-move-recognition"
+Issues = "https://github.com/Kyouku/chess-move-recognition/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -11,7 +11,7 @@ type: software
 authors:
   - given-names: Jannes
     family-names: Wolarz
-repository-code: "https://github.com/JannesWolarz/chess-move-recognition"
+repository-code: "https://github.com/Kyouku/chess-move-recognition"
 abstract: >-
   Open-source companion code to the B.Sc. thesis on
   automated chess move recognition from monocular

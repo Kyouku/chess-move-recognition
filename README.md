@@ -106,7 +106,7 @@ YOLO11s @ 640 × 640 is the default — slightly slower than 416, but visibly mo
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/JannesWolarz/chess-move-recognition.git
+git clone https://github.com/Kyouku/chess-move-recognition.git
 cd chess-move-recognition
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
