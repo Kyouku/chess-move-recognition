@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chess-move-recognition"
+version = "0.1.0"
+description = "Real-time chess move recognition from video using a multi-stage CV pipeline (board rectification, YOLO piece detection, temporal move tracking)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Jannes Wolarz" },
+]
+keywords = ["chess", "computer-vision", "yolo", "opencv", "move-recognition"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=2.2.6",
+    "opencv-contrib-python>=4.12.0.88",
+    "ultralytics>=8.3.233",
+    "python-chess>=1.10.0",
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
+    "onnxruntime>=1.23.2",
+    "onnx>=1.15.0",
+]
+
+[project.urls]
+Repository = "https://github.com/JannesWolarz/chess-move-recognition"
+Issues = "https://github.com/JannesWolarz/chess-move-recognition/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
